@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger, PinoLogger } from 'nestjs-pino';
 import { patchNestJsSwagger } from 'nestjs-zod';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
@@ -7,9 +8,12 @@ import { GlobalExceptionFilter } from './shared/filters/global-exception.filter'
 patchNestJsSwagger();
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const logger = app.get(Logger);
+  app.useLogger(logger);
 
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  const pinoLogger = await app.resolve(PinoLogger);
+  app.useGlobalFilters(new GlobalExceptionFilter(pinoLogger));
 
   const port = process.env['PORT'] ? parseInt(process.env['PORT'], 10) : 3000;
 
@@ -28,8 +32,8 @@ async function bootstrap(): Promise<void> {
 
   await app.listen(port);
 
-  console.log(`Application is running on: http://localhost:${port}`);
-  console.log(`Swagger UI available at: http://localhost:${port}/api/docs`);
+  logger.log(`Application is running on: http://localhost:${port}`);
+  logger.log(`Swagger UI available at: http://localhost:${port}/api/docs`);
 }
 
 void bootstrap();
