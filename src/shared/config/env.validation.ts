@@ -1,10 +1,5 @@
 import { z } from 'zod';
 
-/**
- * Zod schema for environment variable validation.
- * This is the single source of truth for all configuration values.
- * The application will fail to start if any required variables are missing or invalid.
- */
 export const envSchema = z.object({
   /** HTTP port the server listens on. Default: 3000 */
   PORT: z
@@ -67,6 +62,12 @@ export const envSchema = z.object({
     .default('5')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
+
+  /** OpenTelemetry OTLP exporter endpoint URL (optional). */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  /** OpenTelemetry service name. Default: 'api-cep' */
+  OTEL_SERVICE_NAME: z.string().default('api-cep'),
 });
 
 export type Env = z.infer<typeof envSchema>;
