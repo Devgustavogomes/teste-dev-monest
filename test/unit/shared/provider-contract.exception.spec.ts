@@ -10,8 +10,7 @@ describe('ProviderContractException', () => {
     });
 
     const parseResult = dummySchema.safeParse({
-      cep: 12345, // invalid type
-      // missing localidade
+      cep: 12345,
     });
 
     expect(parseResult.success).toBe(false);

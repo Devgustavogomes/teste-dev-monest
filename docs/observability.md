@@ -1,63 +1,45 @@
 # Arquitetura de Observabilidade & Telemetria
 
-Este documento descreve a arquitetura, decisões técnicas e comportamento operacional da stack de observabilidade da aplicação, abrangendo **Logging Estruturado**, **Rastreamento Distribuído (Distributed Tracing)** e **Métricas de Negócio** com **OpenTelemetry** e **Pino**.
+Este documento descreve a stack de observabilidade da aplicação, abrangendo **Logging Estruturado (Pino)**, **Rastreamento Distribuído W3C** e **Métricas de Negócio** com **OpenTelemetry (OTel)**.
 
 ---
 
-## 1. Visão Geral & Decisões Arquiteturais
+## 1. Visão Geral
 
-A observabilidade foi projetada sobre três pilares unificados, com baixo overhead de execução e adesão a padrões abertos de mercado (CNCF / W3C):
+A arquitetura unifica logs, traces e métricas sob padrões abertos CNCF, garantindo baixo overhead e independência de fornecedor (*vendor-neutral*):
 
 ```
-                                  REQUISIÇÃO HTTP (Entrada)
-                                             │
-                       ┌─────────────────────┴─────────────────────┐
-                       ▼                                           ▼
-             [OpenTelemetry SDK]                            [Pino Logger]
-       Gera trace_id & span_id (W3C)                Gera req.id local (UUID v4)
-                       │                                           │
-                       └─────────────────────┬─────────────────────┘
-                                             │
-                                             ▼
-                             Logs Correlacionados via Mixin:
-                       { req.id, trace_id, span_id, durationMs, ... }
-                                             │
-                        ┌────────────────────┼────────────────────┐
-                        ▼                    ▼                    ▼
-                [Traces OTLP]          [Métricas OTLP]       [Logs JSON]
-              (Grafana/Tempo)         (Prometheus/Mimir)     (Loki/ELK)
+                              REQUISIÇÃO HTTP (Entrada)
+                                         │
+                   ┌─────────────────────┴─────────────────────┐
+                   ▼                                           ▼
+         [OpenTelemetry SDK]                            [Pino Logger]
+   Gera trace_id & span_id (W3C)                Gera req.id local (UUID v4)
+                   │                                           │
+                   └─────────────────────┬─────────────────────┘
+                                         │
+                                         ▼
+                         Logs Correlacionados via Mixin:
+                   { req.id, trace_id, span_id, durationMs, ... }
+                                         │
+                    ┌────────────────────┼────────────────────┐
+                    ▼                    ▼                    ▼
+            [Traces OTLP]          [Métricas OTLP]       [Logs JSON]
+          (Grafana/Tempo)         (Prometheus/Mimir)     (Loki/ELK)
 ```
 
-### Por que OpenTelemetry (OTel)?
-- **Padrão Neutro da Indústria:** Evita acoplamento proprietário (vendor lock-in) com fornecedores específicos como Datadog, Dynatrace ou New Relic. A aplicação exporta via protocolo aberto **OTLP** (`OTEL_EXPORTER_OTLP_ENDPOINT`).
-- **Context Propagation W3C:** Propaga o cabeçalho `traceparent` padronizado entre sistemas distribuídos.
-- **Instrumentação Automática Seletiva:** Inicializado via `src/instrumentation.ts` antes do bootstrap do NestJS, instrumentando chamadas HTTP (`express`, `axios`/`http`), desativando instrumentações ruidosas (`fs`, `dns`).
-
 ---
 
-## 2. Configuração & Variáveis de Ambiente
+## 2. Correlação de Logs e Traces (`traceCorrelationMixin`)
 
-Todas as configurações são estritamente validadas na inicialização via Zod em `src/shared/config/env.validation.ts`:
-
-| Variável | Tipo | Padrão | Descrição |
-| :--- | :---: | :---: | :--- |
-| `LOG_LEVEL` | Enum (`trace`, `debug`, `info`, `warn`, `error`, `fatal`) | `info` | Nível mínimo de severidade do Pino. |
-| `OTEL_SERVICE_NAME` | String | `api-cep` | Identificador do serviço nas traces e métricas. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | URL (opcional) | `undefined` | Endpoint do coletor OTLP (ex: `http://otel-collector:4318`). |
-
----
-
-## 3. Correlação de Logs e Traces (`traceCorrelationMixin`)
-
-Em `src/app.module.ts`, o `pino-http` injeta dinamicamente o contexto ativo do OpenTelemetry em **todas** as linhas de log:
+Em `src/app.module.ts`, o `pino-http` injeta o contexto do OpenTelemetry em **todas** as linhas de log:
 
 ```typescript
 export const traceCorrelationMixin = () => {
   const span = trace.getSpan(context.active());
   const spanContext = span?.spanContext();
-  if (!spanContext || !trace.isSpanContextValid(spanContext)) {
-    return {};
-  }
+  if (!spanContext || !trace.isSpanContextValid(spanContext)) return {};
+
   return {
     trace_id: spanContext.traceId,
     span_id: spanContext.spanId,
@@ -65,68 +47,50 @@ export const traceCorrelationMixin = () => {
 };
 ```
 
-### Diferença entre `req.id`, `trace_id` e `span_id`
-
-- **`req.id` (Local):** UUID v4 gerado pelo Pino para identificar aquela requisição HTTP específica nesta instância do NestJS.
-- **`trace_id` (Global W3C):** Identificador de 32 caracteres hexadecimais que representa a transação de ponta a ponta através de todos os serviços.
-- **`span_id` (Etapa W3C):** Identificador de 16 caracteres hexadecimais que localiza a operação atômica exata (ex: chamada de saída à ViaCEP).
+### Identificadores:
+- **`req.id` (Local):** UUID v4 gerado pelo Pino para identificar a requisição nesta instância.
+- **`trace_id` (Global W3C):** Hexadecimal de 32 caracteres que rastreia a transação entre múltiplos serviços.
+- **`span_id` (Etapa W3C):** Hexadecimal de 16 caracteres que identifica uma operação atômica específica.
 
 ---
 
-## 4. Métricas de Negócio & Resiliência (`TelemetryMetricsService`)
+## 3. Métricas de Negócio & Resiliência (`TelemetryMetricsService`)
 
-Implementado em `src/shared/observability/telemetry-metrics.service.ts`, registra métricas sob o medidor `api-cep`:
+Implementado em `src/shared/observability/telemetry-metrics.service.ts` sob o medidor `api-cep`:
 
-### Instrumentos Coletados
-
-| Nome da Métrica | Tipo OTel | Atributos (Labels) | Finalidade Operacional |
+| Métrica | Tipo | Labels | Finalidade |
 | :--- | :---: | :--- | :--- |
-| `cep_requests_total` | Counter | `provider`, `status` (`success`, `fallback`, `not_found`, `error`, `contract_violation`) | Mede taxa de sucesso, fallbacks e quebras críticas de contrato por provedor. |
-| `cep_cache_requests_total` | Counter | `result` (`hit`, `miss`, `negative_hit`) | Permite calcular o **Cache Hit Ratio** e a eficácia do Negative Caching. |
-| `circuit_breaker_state` | UpDownCounter | `provider` | Monitora o estado da proteção: `0=Closed`, `1=Open`, `2=Half-Open`. |
+| `cep_requests_total` | Counter | `provider`, `status` (`success`, `fallback`, `not_found`, `error`, `contract_violation`) | Mede taxa de sucesso, falhas, fallbacks e violações de schema por provedor. |
+| `cep_cache_requests_total` | Counter | `result` (`hit`, `miss`, `negative_hit`) | Permite calcular taxa de acerto do cache (*Cache Hit Ratio*) e Negative Caching. |
+| `circuit_breaker_state` | UpDownCounter | `provider` | Estado do circuito: `0=Closed`, `1=Open`, `2=Half-Open`. |
 
-### Princípio de Não-Ruptura
-Todas as operações de registro de métricas são envolvidas em blocos `try/catch` defensivos:
-> **A telemetria nunca pode interromper ou falhar uma requisição de negócio do usuário.**
+> **Princípio de Não-Ruptura:** O registro de métricas roda em blocos defensivos; falhas de telemetria nunca afetam o fluxo de negócio do usuário.
 
 ---
 
-### Detecção e Alertas para Quebra de Contrato (`ProviderContractException`)
+## 4. Detecção de Quebra de Contrato (`ProviderContractException`)
 
-Quando um provedor externo altera seu formato de resposta sem aviso prévio, a falha é tratada de forma estrita via Zod `safeParse` e lança a exceção personalizada `ProviderContractException`. O caso de uso (`FindCepUseCase`) registra:
+Quando uma API externa altera o formato de resposta e falha na validação Zod (`safeParse`):
 
-1. **Log com severidade `ERROR`** contendo o código `PROVIDER_CONTRACT_VIOLATION` e a lista estruturada de `issues`.
-2. **Métrica com status `contract_violation`** em `cep_requests_total`.
-
-#### Exemplos de Regras de Alerta Externas:
-
-- **Prometheus (Alertmanager):**
-  ```yaml
-  - alert: ExternalProviderContractViolation
-    expr: sum(rate(cep_requests_total{status="contract_violation"}[1m])) > 0
-    for: 0m
-    labels:
-      severity: critical
-    annotations:
-      summary: "Quebra crítica de contrato detectada no provedor {{ $labels.provider }}"
-  ```
-
-- **Grafana Loki (LogQL):**
-  ```logql
-  sum(rate({app="api-cep"} |= "PROVIDER_CONTRACT_VIOLATION" [1m])) > 0
-  ```
+1. **Log estruturado em nível `ERROR`:** Contém o código `PROVIDER_CONTRACT_VIOLATION` e a lista de `issues` detalhadas do schema.
+2. **Métrica `cep_requests_total`:** Incrementada com `status: "contract_violation"`, permitindo configurar alertas imediatos no Prometheus / Alertmanager.
+3. **Fallback Automático:** O `FindCepUseCase` captura o erro e avança para o próximo provedor.
 
 ---
 
-## 5. Inicialização da Instrumentação (`src/instrumentation.ts`)
+## 5. Inicialização e Graceful Shutdown (`src/instrumentation.ts`)
 
-A inicialização do SDK ocorre antes de qualquer módulo da aplicação ser carregado, garantindo o patch correto das bibliotecas nativas de rede (`http`/`https`):
+- O SDK do OpenTelemetry é inicializado **antes** do bootstrap do NestJS para garantir o patch correto das bibliotecas de rede (`http`, `https`, `axios`).
+- Encerramento gracioso interceptado em `SIGTERM` e `SIGINT` via `shutdown()`, esvaziando o buffer de métricas e traces pendentes.
 
-```typescript
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+---
 
-export const { sdk, shutdown } = initializeInstrumentation();
-```
+## 6. Configuração via Ambiente
 
-O encerramento gracioso (*graceful shutdown*) é interceptado via `SIGTERM` e `SIGINT` para garantir o esvaziamento (*flush*) de métricas e traces pendentes no buffer de exportação.
+Valores validados no bootstrap via Zod (`src/shared/config/env.validation.ts`):
+
+| Variável | Tipo | Padrão | Descrição |
+| :--- | :---: | :---: | :--- |
+| `LOG_LEVEL` | Enum (`trace`, `debug`, `info`, `warn`, `error`, `fatal`) | `info` | Nível de severidade dos logs. |
+| `OTEL_SERVICE_NAME` | String | `api-cep` | Nome do serviço em traces e métricas. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | URL (opcional) | `undefined` | Endpoint do coletor OTLP (ex: `http://otel-collector:4318`). |

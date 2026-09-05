@@ -39,11 +39,9 @@ describe('LruCacheProvider', () => {
 
       await cacheProvider.set(key, value, ttlMs);
 
-      // Advance time before expiration
       vi.advanceTimersByTime(500);
       expect(await cacheProvider.get(key)).toBe('active-value');
 
-      // Advance time past expiration
       vi.advanceTimersByTime(501);
       const expiredResult = await cacheProvider.get(key);
       expect(expiredResult).toBeNull();
@@ -56,13 +54,11 @@ describe('LruCacheProvider', () => {
 
       await cacheProvider.set(key, value, ttlMs);
 
-      // Advance time past expiration
       vi.advanceTimersByTime(1001);
 
       const result = await cacheProvider.get(key);
       expect(result).toBeNull();
 
-      // Verify it was deleted from internal store by checking subsequent access
       expect(await cacheProvider.get(key)).toBeNull();
     });
 
@@ -72,10 +68,8 @@ describe('LruCacheProvider', () => {
 
       vi.advanceTimersByTime(800);
 
-      // Reset with new value and new TTL
       await cacheProvider.set(key, 'updated', 1000);
 
-      // Advance past initial expiration (800 + 300 = 1100 ms total from start)
       vi.advanceTimersByTime(300);
 
       expect(await cacheProvider.get(key)).toBe('updated');
@@ -89,14 +83,12 @@ describe('LruCacheProvider', () => {
       await smallCache.set('key1', 'val1', 10000);
       await smallCache.set('key2', 'val2', 10000);
 
-      // Access key1 so key2 becomes the least recently used
       await smallCache.get('key1');
 
-      // Add key3, triggering LRU eviction of key2
       await smallCache.set('key3', 'val3', 10000);
 
       expect(await smallCache.get('key1')).toBe('val1');
-      expect(await smallCache.get('key2')).toBeNull(); // evicted!
+      expect(await smallCache.get('key2')).toBeNull();
       expect(await smallCache.get('key3')).toBe('val3');
     });
   });

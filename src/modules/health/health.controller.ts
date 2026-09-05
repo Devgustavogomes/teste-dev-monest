@@ -1,20 +1,9 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
-/**
- * HealthController — simple application health check endpoint.
- *
- * Returns { status: 'ok' } with HTTP 200 when the application is running.
- * Intentionally minimal — no dependencies, no business logic.
- */
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
-  /**
-   * GET /health
-   *
-   * Returns the current health status of the application.
-   */
   @Get()
   @ApiOperation({
     summary: 'Application health check',

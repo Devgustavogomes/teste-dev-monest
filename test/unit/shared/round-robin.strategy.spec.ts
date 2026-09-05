@@ -25,7 +25,6 @@ describe('RoundRobinStrategy', () => {
       expect(strategy.nextSequence()).toEqual(['A', 'B', 'C']);
       expect(strategy.nextSequence()).toEqual(['B', 'C', 'A']);
       expect(strategy.nextSequence()).toEqual(['C', 'A', 'B']);
-      // Wrap around
       expect(strategy.nextSequence()).toEqual(['A', 'B', 'C']);
     });
 

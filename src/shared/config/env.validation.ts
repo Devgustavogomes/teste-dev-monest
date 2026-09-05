@@ -1,22 +1,18 @@
 import { z } from 'zod';
 
 export const envSchema = z.object({
-  /** HTTP port the server listens on. Default: 3000 */
   PORT: z
     .string()
     .default('3000')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
 
-  /** Log level for Pino logger. Default: 'info' */
   LOG_LEVEL: z
     .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
     .default('info'),
 
-  /** Application environment mode. Default: 'development' */
   NODE_ENV: z.string().default('development'),
 
-  /** Timeout in milliseconds for each CEP provider HTTP call. Default: 5000 */
   CEP_PROVIDER_TIMEOUT_MS: z
     .string()
     .default('5000')
@@ -42,31 +38,26 @@ export const envSchema = z.object({
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
 
-  /** Percentage of failures in the rolling window to trip the circuit. Default: 50 */
   CB_ERROR_THRESHOLD_PERCENTAGE: z
     .string()
     .default('50')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().min(0).max(100)),
 
-  /** Time in ms the circuit stays open before entering half-open. Default: 30000 */
   CB_RESET_TIMEOUT_MS: z
     .string()
     .default('30000')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
 
-  /** Minimum number of requests in the rolling window before evaluating the error threshold. Default: 5 */
   CB_VOLUME_THRESHOLD: z
     .string()
     .default('5')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
 
-  /** OpenTelemetry OTLP exporter endpoint URL (optional). */
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
-  /** OpenTelemetry service name. Default: 'api-cep' */
   OTEL_SERVICE_NAME: z.string().default('api-cep'),
 });
 

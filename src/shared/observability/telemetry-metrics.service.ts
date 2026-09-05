@@ -46,7 +46,7 @@ export class TelemetryMetricsService {
     try {
       this.cepRequestsTotal.add(1, { provider, status });
     } catch {
-      // Metric operations should not disrupt calling business logic
+      return;
     }
   }
 
@@ -54,7 +54,7 @@ export class TelemetryMetricsService {
     try {
       this.cepCacheRequestsTotal.add(1, { result });
     } catch {
-      // Metric operations should not disrupt calling business logic
+      return;
     }
   }
 
@@ -68,7 +68,7 @@ export class TelemetryMetricsService {
         this.circuitBreakerState.add(state, { provider });
       }
     } catch {
-      // Metric operations should not disrupt calling business logic
+      return;
     }
   }
 }

@@ -85,19 +85,16 @@ describe('FindCepUseCase', () => {
       vi.mocked(provider1.find).mockResolvedValue(sampleCepResponse);
       vi.mocked(provider2.find).mockResolvedValue(sampleCepResponse2);
 
-      // Call 1: Should start with provider1
       const res1 = await useCase.execute('01001000');
       expect(provider1.find).toHaveBeenCalledTimes(1);
       expect(provider2.find).toHaveBeenCalledTimes(0);
       expect(res1).toEqual(sampleCepResponse);
 
-      // Call 2: Should start with provider2
       const res2 = await useCase.execute('01001000');
       expect(provider1.find).toHaveBeenCalledTimes(1);
       expect(provider2.find).toHaveBeenCalledTimes(1);
       expect(res2).toEqual(sampleCepResponse2);
 
-      // Call 3: Should wrap around and start with provider1
       const res3 = await useCase.execute('01001000');
       expect(provider1.find).toHaveBeenCalledTimes(2);
       expect(provider2.find).toHaveBeenCalledTimes(1);
@@ -152,7 +149,6 @@ describe('FindCepUseCase', () => {
 
       expect(result).toEqual(sampleCepResponse2);
 
-      // Verify logger.error was invoked with critical metadata
       expect(dummyLogger.error).toHaveBeenCalledTimes(1);
       expect(dummyLogger.error).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -167,7 +163,6 @@ describe('FindCepUseCase', () => {
         ),
       );
 
-      // Verify telemetry metric was incremented with contract_violation
       expect(dummyTelemetry.incrementCepRequests).toHaveBeenCalledWith(
         'Provider1',
         'contract_violation',
