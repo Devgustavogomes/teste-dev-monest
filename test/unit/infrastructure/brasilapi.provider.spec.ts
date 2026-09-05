@@ -6,6 +6,7 @@ import { of, throwError } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
 import { BrasilApiProvider } from '../../../src/modules/cep/infrastructure/providers/brasilapi.provider';
 import { Env } from '../../../src/shared/config/env.validation';
+import { ProviderContractException } from '../../../src/shared/errors/provider-contract.exception';
 
 describe('BrasilApiProvider', () => {
   let provider: BrasilApiProvider;
@@ -180,7 +181,7 @@ describe('BrasilApiProvider', () => {
       await expect(provider.find('01001000')).rejects.toThrow(unexpectedError);
     });
 
-    it('should throw ZodError with [BRASILAPI] prefix when response payload is invalid', async () => {
+    it('should throw ProviderContractException with [BRASILAPI] prefix when response payload is invalid', async () => {
       const invalidResponse = {
         data: {
           invalid_field: 123,
@@ -193,6 +194,9 @@ describe('BrasilApiProvider', () => {
 
       vi.spyOn(httpService, 'get').mockReturnValue(of(invalidResponse));
 
+      await expect(provider.find('01001000')).rejects.toThrow(
+        ProviderContractException,
+      );
       await expect(provider.find('01001000')).rejects.toThrow('[BRASILAPI]');
     });
   });

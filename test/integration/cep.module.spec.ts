@@ -7,7 +7,7 @@ import { AxiosError, AxiosResponse } from 'axios';
 import { LoggerModule } from 'nestjs-pino';
 import { CepModule } from '../../src/modules/cep/cep.module';
 import { CEP_PROVIDERS } from '../../src/modules/cep/cep.constants';
-import { BuscarCepUseCase } from '../../src/modules/cep/application/use-cases/buscar-cep.use-case';
+import { FindCepUseCase } from '../../src/modules/cep/application/use-cases/find-cep.use-case';
 import { CepProvider } from '../../src/modules/cep/domain/interfaces/cep-provider.interface';
 import { validate } from '../../src/shared/config/env.validation';
 import { CepNotFoundException } from '../../src/shared/errors/cep-not-found.exception';
@@ -17,7 +17,7 @@ import { ObservabilityModule } from '../../src/shared/observability/observabilit
 
 describe('CepModule (Integration)', () => {
   let moduleRef: TestingModule;
-  let useCase: BuscarCepUseCase;
+  let useCase: FindCepUseCase;
   let providersList: CepProvider[];
   let mockHttpService: { get: ReturnType<typeof vi.fn> };
 
@@ -72,7 +72,7 @@ describe('CepModule (Integration)', () => {
       .useValue(mockHttpService)
       .compile();
 
-    useCase = moduleRef.get<BuscarCepUseCase>(BuscarCepUseCase);
+    useCase = moduleRef.get<FindCepUseCase>(FindCepUseCase);
     providersList = moduleRef.get<CepProvider[]>(CEP_PROVIDERS);
   });
 
@@ -244,7 +244,7 @@ describe('CepModule (Integration)', () => {
      */
 
     let cbModuleRef: TestingModule;
-    let cbUseCase: BuscarCepUseCase;
+    let cbUseCase: FindCepUseCase;
     let cbProvidersList: CepProvider[];
     let cbMockHttpService: { get: ReturnType<typeof vi.fn> };
 
@@ -271,7 +271,7 @@ describe('CepModule (Integration)', () => {
         .useValue(cbMockHttpService)
         .compile();
 
-      cbUseCase = cbModuleRef.get<BuscarCepUseCase>(BuscarCepUseCase);
+      cbUseCase = cbModuleRef.get<FindCepUseCase>(FindCepUseCase);
       cbProvidersList = cbModuleRef.get<CepProvider[]>(CEP_PROVIDERS);
     });
 
