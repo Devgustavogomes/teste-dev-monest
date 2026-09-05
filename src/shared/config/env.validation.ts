@@ -26,6 +26,18 @@ export const envSchema = z.object({
     .string()
     .url()
     .default('https://brasilapi.com.br/api/cep/v1'),
+
+  CACHE_TTL_MS: z
+    .string()
+    .default('86400000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
+
+  CACHE_NEGATIVE_TTL_MS: z
+    .string()
+    .default('600000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
 });
 
 export type Env = z.infer<typeof envSchema>;
