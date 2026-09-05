@@ -38,6 +38,27 @@ export const envSchema = z.object({
     .default('600000')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
+
+  /** Percentage of failures in the rolling window to trip the circuit. Default: 50 */
+  CB_ERROR_THRESHOLD_PERCENTAGE: z
+    .string()
+    .default('50')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().min(0).max(100)),
+
+  /** Time in ms the circuit stays open before entering half-open. Default: 30000 */
+  CB_RESET_TIMEOUT_MS: z
+    .string()
+    .default('30000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
+
+  /** Minimum number of requests in the rolling window before evaluating the error threshold. Default: 5 */
+  CB_VOLUME_THRESHOLD: z
+    .string()
+    .default('5')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
 });
 
 export type Env = z.infer<typeof envSchema>;
