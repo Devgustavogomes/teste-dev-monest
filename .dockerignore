@@ -1,0 +1,33 @@
+# Dependencies and build output
+node_modules
+dist
+
+# Tests and coverage
+test
+coverage
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Version control and CI/tooling configs
+.git
+.gitignore
+.github
+.codeforge
+
+# Documentation and markdown files
+docs
+*.md
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Editor and OS metadata
+.vscode
+.idea
+.DS_Store
+Thumbs.db

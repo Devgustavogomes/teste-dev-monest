@@ -1,0 +1,11 @@
+﻿services:
+  api-cep:
+    container_name: api-cep
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '${PORT:-3000}:3000'
+    env_file:
+      - .env
+    restart: unless-stopped
