@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { metrics, Counter, UpDownCounter } from '@opentelemetry/api';
 
-export type CepRequestStatus = 'success' | 'fallback' | 'not_found' | 'error';
+export type CepRequestStatus =
+  'success' | 'fallback' | 'not_found' | 'error' | 'contract_violation';
 export type CacheResult = 'hit' | 'miss' | 'negative_hit';
 export type CircuitBreakerState = 0 | 1 | 2;
 

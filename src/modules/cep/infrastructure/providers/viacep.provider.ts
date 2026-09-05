@@ -34,7 +34,7 @@ export class ViaCepProvider extends BaseHttpCepProvider {
       return null;
     }
 
-    const data = viaCepApiResponseSchema.parse(rawData);
+    const data = this.validateResponse(viaCepApiResponseSchema, rawData);
 
     if (!('cep' in data)) {
       return null;

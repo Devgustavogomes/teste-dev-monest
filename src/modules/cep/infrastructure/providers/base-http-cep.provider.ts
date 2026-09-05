@@ -3,9 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError } from 'axios';
+import { z } from 'zod';
 import { CepProvider } from '../../domain/interfaces/cep-provider.interface';
 import { CepResponse } from '../../presentation/schemas/cep-response.schema';
 import { Env } from '../../../../shared/config/env.validation';
+import { ProviderContractException } from '../../../../shared/errors/provider-contract.exception';
 
 export interface FetchOptions {
   notFoundOn404?: boolean;
@@ -83,6 +85,24 @@ export abstract class BaseHttpCepProvider implements CepProvider {
 
       throw error;
     }
+  }
+
+  protected validateResponse<
+    TOutput,
+    TDef extends z.ZodTypeDef = z.ZodTypeDef,
+    TInput = unknown,
+  >(schema: z.ZodType<TOutput, TDef, TInput>, rawData: unknown): TOutput {
+    const result = schema.safeParse(rawData);
+
+    if (!result.success) {
+      throw new ProviderContractException(
+        this.name,
+        result.error.issues,
+        rawData,
+      );
+    }
+
+    return result.data;
   }
 
   abstract find(cep: string): Promise<CepResponse | null>;
