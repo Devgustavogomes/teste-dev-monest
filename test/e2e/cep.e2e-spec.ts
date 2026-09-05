@@ -31,7 +31,6 @@ describe('CepController (e2e — real external APIs)', () => {
   });
 
   it('GET /cep/01001000 — Cache Miss on first request (X-Cache: MISS) and Cache Hit on immediate subsequent request (X-Cache: HIT) under 5ms', async () => {
-    // 1. First request — Cache Miss (fetches from external provider)
     const firstResponse = await request(app.getHttpServer())
       .get('/cep/01001000')
       .expect(200)
@@ -48,7 +47,6 @@ describe('CepController (e2e — real external APIs)', () => {
     expect(firstResponse.body.street).toBeDefined();
     expect(firstResponse.body.neighborhood).toBeDefined();
 
-    // 2. Immediate second request — Cache Hit
     const secondResponse = await client
       .get('/cep/01001000')
       .expect(200)
@@ -61,7 +59,6 @@ describe('CepController (e2e — real external APIs)', () => {
   }, 15000);
 
   it('GET /cep/01001-000 — hyphenated and unhyphenated queries share the same cache entry (X-Cache: HIT)', async () => {
-    // 01001000 is already cached by previous test; hyphenated variation should hit cache
     const response = await request(app.getHttpServer())
       .get('/cep/01001-000')
       .expect(200)
@@ -77,7 +74,6 @@ describe('CepController (e2e — real external APIs)', () => {
   }, 10000);
 
   it('GET /cep/00000000 — Negative Caching: returns 404 with X-Cache: MISS on first query and X-Cache: HIT on subsequent query', async () => {
-    // 1. First query for non-existent CEP — Cache Miss, queries external providers
     const firstResponse = await request(app.getHttpServer())
       .get('/cep/00000000')
       .expect(404)
@@ -93,7 +89,6 @@ describe('CepController (e2e — real external APIs)', () => {
     });
     expect(firstResponse.body.timestamp).toBeDefined();
 
-    // 2. Immediate second query — Negative Cache Hit (instant response without external calls)
     const secondResponse = await client
       .get('/cep/00000000')
       .expect(404)

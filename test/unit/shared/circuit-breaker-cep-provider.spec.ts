@@ -108,10 +108,8 @@ describe('CircuitBreakerCepProvider', () => {
 
       const callsBeforeOpen = vi.mocked(mockProvider.find).mock.calls.length;
 
-      // The circuit should now be open; subsequent calls must fail immediately
       await expect(decorator.find('01001000')).rejects.toThrow();
 
-      // The provider should NOT have been called again (opossum short-circuits)
       expect(vi.mocked(mockProvider.find).mock.calls.length).toBe(
         callsBeforeOpen,
       );
@@ -125,10 +123,8 @@ describe('CircuitBreakerCepProvider', () => {
       );
       await expect(decorator.find('01001000')).rejects.toThrow();
 
-      // Wait for resetTimeout (100ms) so the circuit moves to half-open
       await new Promise((resolve) => setTimeout(resolve, 150));
 
-      // Now the provider succeeds - the half-open test call should go through
       vi.mocked(mockProvider.find).mockResolvedValue(sampleCepResponse);
       const result = await decorator.find('01001000');
 

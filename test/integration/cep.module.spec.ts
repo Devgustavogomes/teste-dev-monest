@@ -77,7 +77,6 @@ describe('CepModule (Integration)', () => {
   });
 
   afterEach(async () => {
-    // Shutdown any open opossum circuit breaker timers to prevent test hangs
     if (providersList) {
       for (const provider of providersList) {
         if (provider instanceof CircuitBreakerCepProvider) {
@@ -111,7 +110,6 @@ describe('CepModule (Integration)', () => {
     });
 
     it('should alternate to BrasilAPI on the second call (Round Robin)', async () => {
-      // First call -> ViaCEP
       mockHttpService.get.mockReturnValueOnce(of(mockViaCepSuccessResponse));
       await useCase.execute('01001000');
       expect(mockHttpService.get).toHaveBeenLastCalledWith(
@@ -119,7 +117,6 @@ describe('CepModule (Integration)', () => {
         { timeout: 5000 },
       );
 
-      // Second call -> BrasilAPI
       mockHttpService.get.mockReturnValueOnce(of(mockBrasilApiSuccessResponse));
       const result2 = await useCase.execute('01001000');
       expect(mockHttpService.get).toHaveBeenLastCalledWith(
@@ -140,7 +137,6 @@ describe('CepModule (Integration)', () => {
     it('should fallback to BrasilAPI when ViaCEP throws a network error', async () => {
       const networkError = new AxiosError('Network Error', 'ENOTFOUND');
 
-      // Call 1 starts with ViaCEP -> fails, then fallbacks to BrasilAPI -> succeeds
       mockHttpService.get
         .mockReturnValueOnce(throwError(() => networkError))
         .mockReturnValueOnce(of(mockBrasilApiSuccessResponse));
@@ -234,15 +230,6 @@ describe('CepModule (Integration)', () => {
   });
 
   describe('Circuit Breaker Fail-Fast Behavior', () => {
-    /**
-     * This test group validates that once both circuit breakers are tripped open,
-     * the use case rejects with AllProvidersFailedException WITHOUT calling HttpService.
-     *
-     * Strategy: bootstrap a dedicated module with very low CB thresholds
-     * (volumeThreshold=2, errorThresholdPercentage=50) so we can open both circuits
-     * with just 2 failed calls each, then verify fail-fast on the next call.
-     */
-
     let cbModuleRef: TestingModule;
     let cbUseCase: FindCepUseCase;
     let cbProvidersList: CepProvider[];
@@ -260,7 +247,7 @@ describe('CepModule (Integration)', () => {
           ConfigModule.forRoot({
             isGlobal: true,
             validate,
-            ignoreEnvFile: true, // use process.env only
+            ignoreEnvFile: true,
           }),
           LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
           ObservabilityModule,

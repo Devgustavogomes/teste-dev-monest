@@ -45,17 +45,13 @@ export class TelemetryMetricsService {
   incrementCepRequests(provider: string, status: CepRequestStatus): void {
     try {
       this.cepRequestsTotal.add(1, { provider, status });
-    } catch {
-      // Metric operations should not disrupt calling business logic
-    }
+    } catch {}
   }
 
   incrementCacheRequests(result: CacheResult): void {
     try {
       this.cepCacheRequestsTotal.add(1, { result });
-    } catch {
-      // Metric operations should not disrupt calling business logic
-    }
+    } catch {}
   }
 
   setCircuitBreakerState(provider: string, state: CircuitBreakerState): void {
@@ -67,8 +63,6 @@ export class TelemetryMetricsService {
       } else {
         this.circuitBreakerState.add(state, { provider });
       }
-    } catch {
-      // Metric operations should not disrupt calling business logic
-    }
+    } catch {}
   }
 }
