@@ -89,7 +89,9 @@ describe('cepSchema and ZodValidationPipe', () => {
         expect(exception.getStatus()).toBe(400);
         const response = exception.getResponse();
         expect(response.statusCode).toBe(400);
-        expect(response.message).toBe('Invalid CEP format. Must contain 8 numeric digits.');
+        expect(response.message).toBe(
+          'Invalid CEP format. Must contain 8 numeric digits.',
+        );
         expect(response.error).toBe('Bad Request');
       }
     });

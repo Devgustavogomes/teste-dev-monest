@@ -18,7 +18,8 @@ describe('BrasilApiProvider', () => {
 
     configService = {
       get: vi.fn((key: string) => {
-        if (key === 'BRASILAPI_BASE_URL') return 'https://brasilapi.com.br/api/cep/v1';
+        if (key === 'BRASILAPI_BASE_URL')
+          return 'https://brasilapi.com.br/api/cep/v1';
         if (key === 'CEP_PROVIDER_TIMEOUT_MS') return 5000;
         return undefined;
       }),

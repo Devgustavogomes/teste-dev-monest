@@ -112,16 +112,24 @@ describe('BuscarCepUseCase', () => {
       vi.mocked(provider1.find).mockResolvedValue(null);
       vi.mocked(provider2.find).mockResolvedValue(null);
 
-      await expect(useCase.execute('99999999')).rejects.toThrow(CepNotFoundException);
+      await expect(useCase.execute('99999999')).rejects.toThrow(
+        CepNotFoundException,
+      );
       expect(provider1.find).toHaveBeenCalledWith('99999999');
       expect(provider2.find).toHaveBeenCalledWith('99999999');
     });
 
     it('should throw AllProvidersFailedException when all providers throw errors', async () => {
-      vi.mocked(provider1.find).mockRejectedValue(new Error('Timeout in provider 1'));
-      vi.mocked(provider2.find).mockRejectedValue(new Error('Connection error in provider 2'));
+      vi.mocked(provider1.find).mockRejectedValue(
+        new Error('Timeout in provider 1'),
+      );
+      vi.mocked(provider2.find).mockRejectedValue(
+        new Error('Connection error in provider 2'),
+      );
 
-      await expect(useCase.execute('01001000')).rejects.toThrow(AllProvidersFailedException);
+      await expect(useCase.execute('01001000')).rejects.toThrow(
+        AllProvidersFailedException,
+      );
       expect(provider1.find).toHaveBeenCalledWith('01001000');
       expect(provider2.find).toHaveBeenCalledWith('01001000');
     });
@@ -130,14 +138,20 @@ describe('BuscarCepUseCase', () => {
       vi.mocked(provider1.find).mockRejectedValue(new Error('Timeout'));
       vi.mocked(provider2.find).mockResolvedValue(null);
 
-      await expect(useCase.execute('01001000')).rejects.toThrow(CepNotFoundException);
+      await expect(useCase.execute('01001000')).rejects.toThrow(
+        CepNotFoundException,
+      );
     });
 
     it('should throw CepNotFoundException when first provider returns null and second throws', async () => {
       vi.mocked(provider1.find).mockResolvedValue(null);
-      vi.mocked(provider2.find).mockRejectedValue(new Error('500 Internal Server Error'));
+      vi.mocked(provider2.find).mockRejectedValue(
+        new Error('500 Internal Server Error'),
+      );
 
-      await expect(useCase.execute('01001000')).rejects.toThrow(CepNotFoundException);
+      await expect(useCase.execute('01001000')).rejects.toThrow(
+        CepNotFoundException,
+      );
     });
   });
 });

@@ -11,4 +11,4 @@
  * Defined in a separate file to avoid circular imports between cep.module.ts
  * and buscar-cep.use-case.ts.
  */
-export const CEP_PROVIDERS = Symbol("CEP_PROVIDERS");
+export const CEP_PROVIDERS = Symbol('CEP_PROVIDERS');

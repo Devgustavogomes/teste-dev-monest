@@ -6,7 +6,12 @@ export class AppError extends HttpException {
     super({ statusCode, message, error, timestamp }, statusCode);
   }
 
-  override getResponse(): { statusCode: number; message: string; error: string; timestamp: string } {
+  override getResponse(): {
+    statusCode: number;
+    message: string;
+    error: string;
+    timestamp: string;
+  } {
     return super.getResponse() as {
       statusCode: number;
       message: string;

@@ -13,7 +13,6 @@ import { CepController } from '../../src/modules/cep/presentation/controllers/ce
 import { CepProvider } from '../../src/modules/cep/domain/interfaces/cep-provider.interface';
 import { RoundRobinStrategy } from '../../src/shared/strategies/round-robin.strategy';
 import { validate } from '../../src/shared/config/env.validation';
-import { InvalidCepException } from '../../src/shared/errors/invalid-cep.exception';
 import { CepNotFoundException } from '../../src/shared/errors/cep-not-found.exception';
 import { AllProvidersFailedException } from '../../src/shared/errors/all-providers-failed.exception';
 
@@ -124,7 +123,7 @@ describe('CepModule (Integration)', () => {
     it('should lookup CEP via ViaCEP on the first call and map response', async () => {
       mockHttpService.get.mockReturnValue(of(mockViaCepSuccessResponse));
 
-      const result = await useCase.execute('01001-000');
+      const result = await useCase.execute('01001000');
 
       expect(mockHttpService.get).toHaveBeenCalledTimes(1);
       expect(mockHttpService.get).toHaveBeenCalledWith(
@@ -170,10 +169,7 @@ describe('CepModule (Integration)', () => {
     });
 
     it('should fallback to BrasilAPI when ViaCEP throws a network error', async () => {
-      const networkError = new AxiosError(
-        'Network Error',
-        'ENOTFOUND',
-      );
+      const networkError = new AxiosError('Network Error', 'ENOTFOUND');
 
       // Call 1 starts with ViaCEP -> fails, then fallbacks to BrasilAPI -> succeeds
       mockHttpService.get
@@ -242,7 +238,9 @@ describe('CepModule (Integration)', () => {
         .mockReturnValueOnce(of(viaCepNotFound))
         .mockReturnValueOnce(throwError(() => brasilApi404));
 
-      await expect(useCase.execute('99999999')).rejects.toThrow(CepNotFoundException);
+      await expect(useCase.execute('99999999')).rejects.toThrow(
+        CepNotFoundException,
+      );
       expect(mockHttpService.get).toHaveBeenCalledTimes(2);
     });
 
@@ -259,9 +257,10 @@ describe('CepModule (Integration)', () => {
         .mockReturnValueOnce(throwError(() => serverError))
         .mockReturnValueOnce(throwError(() => serverError));
 
-      await expect(useCase.execute('01001000')).rejects.toThrow(AllProvidersFailedException);
+      await expect(useCase.execute('01001000')).rejects.toThrow(
+        AllProvidersFailedException,
+      );
       expect(mockHttpService.get).toHaveBeenCalledTimes(2);
     });
-
   });
 });

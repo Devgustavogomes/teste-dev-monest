@@ -3,7 +3,7 @@ export class RoundRobinStrategy<T> {
 
   constructor(private readonly items: T[]) {
     if (items.length === 0) {
-      throw new Error("RoundRobinStrategy requires at least one item.");
+      throw new Error('RoundRobinStrategy requires at least one item.');
     }
   }
 
