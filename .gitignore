@@ -1,0 +1,22 @@
+# codeforge internals
+.codeforge
+
+# Build output
+dist
+
+# Dependencies
+node_modules
+
+# Environment variables (sensitive)
+.env
+
+# Coverage output
+coverage
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
