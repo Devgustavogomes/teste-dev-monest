@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-# codeforge internals
+# Codeforge internals
 .codeforge
 
 # Build output
@@ -21,9 +20,4 @@ coverage
 # OS
 .DS_Store
 Thumbs.db
-=======
-.codeforge 
-node_modules
-dist
-.env
->>>>>>> main
+
