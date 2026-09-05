@@ -1,13 +1,15 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { zodToOpenAPI } from 'nestjs-zod';
 import { BuscarCepUseCase } from '../../application/use-cases/buscar-cep.use-case';
 import { CepResponse, CepResponseSchema } from '../schemas/cep-response.schema';
 import { cepSchema } from '../schemas/cep-param.schema';
 import { ZodValidationPipe } from '../../../../shared/pipes/zod-validation.pipe';
+import { CepCacheInterceptor } from '../interceptors/cep-cache.interceptor';
 
 @ApiTags('cep')
 @Controller('cep')
+@UseInterceptors(CepCacheInterceptor)
 export class CepController {
   constructor(private readonly buscarCepUseCase: BuscarCepUseCase) {}
 
