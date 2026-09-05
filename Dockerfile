@@ -1,15 +1,16 @@
-# Stage 1: Dependencies
-FROM node:24-alpine AS deps
+# Stage 1: Production dependencies
+FROM node:24-alpine AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --omit=dev
 
 # Stage 2: Builder
 FROM node:24-alpine AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
 
 # Stage 3: Production runner
 FROM node:24-alpine AS runner
@@ -18,7 +19,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=builder --chown=node:node /app/package.json ./
-COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/dist ./dist
 
 USER node
