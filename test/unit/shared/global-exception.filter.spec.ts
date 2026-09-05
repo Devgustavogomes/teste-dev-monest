@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 import { GlobalExceptionFilter } from '../../../src/shared/filters/global-exception.filter';
 import { AppError } from '../../../src/shared/errors/app.error';
 import { InvalidCepException } from '../../../src/shared/errors/invalid-cep.exception';
@@ -8,14 +9,33 @@ import { AllProvidersFailedException } from '../../../src/shared/errors/all-prov
 
 describe('GlobalExceptionFilter', () => {
   let filter: GlobalExceptionFilter;
+  let mockLogger: {
+    setContext: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    info: ReturnType<typeof vi.fn>;
+    debug: ReturnType<typeof vi.fn>;
+  };
   let mockStatus: ReturnType<typeof vi.fn>;
   let mockJson: ReturnType<typeof vi.fn>;
   let mockHost: ArgumentsHost;
+  let mockRequest: { url: string; method: string };
 
   beforeEach(() => {
-    filter = new GlobalExceptionFilter();
+    mockLogger = {
+      setContext: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    };
+    filter = new GlobalExceptionFilter(mockLogger as unknown as PinoLogger);
     mockJson = vi.fn();
     mockStatus = vi.fn().mockReturnValue({ json: mockJson });
+    mockRequest = {
+      url: '/cep/01001000',
+      method: 'GET',
+    };
 
     mockHost = {
       switchToHttp: vi.fn().mockReturnValue({
@@ -23,7 +43,7 @@ describe('GlobalExceptionFilter', () => {
           status: mockStatus,
           json: mockJson,
         }),
-        getRequest: vi.fn(),
+        getRequest: vi.fn().mockReturnValue(mockRequest),
       }),
     } as unknown as ArgumentsHost;
   });

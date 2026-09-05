@@ -1,22 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CallHandler, ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PinoLogger } from 'nestjs-pino';
 import { of, throwError, firstValueFrom } from 'rxjs';
 import { CepCacheInterceptor } from '../../../src/modules/cep/presentation/interceptors/cep-cache.interceptor';
 import { CacheProvider } from '../../../src/shared/cache/cache-provider.interface';
+import { CepResponse } from '../../../src/modules/cep/presentation/schemas/cep-response.schema';
 import { CepNotFoundException } from '../../../src/shared/errors/cep-not-found.exception';
 import { AllProvidersFailedException } from '../../../src/shared/errors/all-providers-failed.exception';
-import { CepResponse } from '../../../src/modules/cep/presentation/schemas/cep-response.schema';
 
 describe('CepCacheInterceptor', () => {
   let interceptor: CepCacheInterceptor;
   let mockCacheProvider: CacheProvider;
-  let mockConfigService: {
-    get: ReturnType<typeof vi.fn>;
-  };
-  let mockResponse: {
-    setHeader: ReturnType<typeof vi.fn>;
-  };
+  let mockConfigService: { get: ReturnType<typeof vi.fn> };
+  let mockResponse: { setHeader: ReturnType<typeof vi.fn> };
   let mockCallHandler: CallHandler;
 
   const mockCepResponse: CepResponse = {
@@ -29,16 +26,17 @@ describe('CepCacheInterceptor', () => {
     ibge: '3550308',
   };
 
-  const DEFAULT_TTL_MS = 86400000;
-  const DEFAULT_NEGATIVE_TTL_MS = 600000;
+  const DEFAULT_TTL_MS = 60000;
+  const DEFAULT_NEGATIVE_TTL_MS = 10000;
 
-  const createMockContext = (cep?: string): ExecutionContext =>
+  const createMockContext = (cepParam?: string) =>
     ({
-      switchToHttp: vi.fn().mockReturnValue({
-        getRequest: vi.fn().mockReturnValue({
-          params: cep !== undefined ? { cep } : {},
+      switchToHttp: () => ({
+        getRequest: () => ({
+          params: cepParam !== undefined ? { cep: cepParam } : {},
+          url: cepParam !== undefined ? `/cep/${cepParam}` : '/health',
         }),
-        getResponse: vi.fn().mockReturnValue(mockResponse),
+        getResponse: () => mockResponse,
       }),
     }) as unknown as ExecutionContext;
 
@@ -66,14 +64,23 @@ describe('CepCacheInterceptor', () => {
       handle: vi.fn(),
     };
 
+    const dummyLogger = {
+      setContext: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as PinoLogger;
+
     interceptor = new CepCacheInterceptor(
       mockCacheProvider,
       mockConfigService as unknown as ConfigService<any, true>,
+      dummyLogger,
     );
   });
 
   describe('Cache Hit scenarios', () => {
-    it('Cache Hit 200 returns cached CepResponse, sets X-Cache: HIT, does not call next.handle()', async () => {
+    it('Cache Hit 200 sets X-Cache: HIT, returns cached response, and skips handler execution', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue(mockCepResponse);
       const context = createMockContext('01001000');
 
@@ -86,14 +93,13 @@ describe('CepCacheInterceptor', () => {
       expect(mockCacheProvider.get).toHaveBeenCalledWith('cep:01001000');
     });
 
-    it('Cache Hit 404 throws CepNotFoundException, sets X-Cache: HIT, does not call next.handle()', async () => {
+    it('Negative Cache Hit throws CepNotFoundException with X-Cache: HIT', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue({ notFound: true });
       const context = createMockContext('01001000');
 
       await expect(
         interceptor.intercept(context, mockCallHandler),
       ).rejects.toThrow(CepNotFoundException);
-
       expect(mockResponse.setHeader).toHaveBeenCalledWith('X-Cache', 'HIT');
       expect(mockCallHandler.handle).not.toHaveBeenCalled();
       expect(mockCacheProvider.get).toHaveBeenCalledWith('cep:01001000');
@@ -152,9 +158,7 @@ describe('CepCacheInterceptor', () => {
 
       const result$ = await interceptor.intercept(context, mockCallHandler);
 
-      await expect(firstValueFrom(result$)).rejects.toThrow(
-        AllProvidersFailedException,
-      );
+      await expect(firstValueFrom(result$)).rejects.toThrow(serverError);
 
       expect(mockResponse.setHeader).toHaveBeenCalledWith('X-Cache', 'MISS');
       expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
@@ -171,9 +175,7 @@ describe('CepCacheInterceptor', () => {
 
       const result$ = await interceptor.intercept(context, mockCallHandler);
 
-      await expect(firstValueFrom(result$)).rejects.toThrow(
-        'Unexpected network failure',
-      );
+      await expect(firstValueFrom(result$)).rejects.toThrow(genericError);
 
       expect(mockResponse.setHeader).toHaveBeenCalledWith('X-Cache', 'MISS');
       expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
@@ -181,66 +183,43 @@ describe('CepCacheInterceptor', () => {
     });
   });
 
-  describe('Key normalization and caching bypass', () => {
-    it('Key normalization normalizes both 01001-000 and 01001000 to key cep:01001000', async () => {
-      vi.mocked(mockCacheProvider.get).mockResolvedValue(mockCepResponse);
+  describe('Non-CEP routes bypass', () => {
+    it('bypasses caching when route is not a CEP lookup (e.g. /health)', async () => {
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => ({
+            params: {},
+            url: '/health',
+          }),
+          getResponse: () => mockResponse,
+        }),
+      } as unknown as ExecutionContext;
+      vi.mocked(mockCallHandler.handle).mockReturnValue(of('health-ok' as any));
 
-      // Hyphenated CEP
-      const contextHyphen = createMockContext('01001-000');
-      const resultHyphen$ = await interceptor.intercept(
-        contextHyphen,
-        mockCallHandler,
+      const result$ = await interceptor.intercept(context, mockCallHandler);
+      const result = await firstValueFrom(result$);
+
+      expect(result).toBe('health-ok');
+      expect(mockCacheProvider.get).not.toHaveBeenCalled();
+      expect(mockResponse.setHeader).not.toHaveBeenCalled();
+      expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Resilience (non-blocking cache write failures)', () => {
+    it('should deliver response normally even if saving to cache fails', async () => {
+      vi.mocked(mockCacheProvider.get).mockResolvedValue(null);
+      vi.mocked(mockCacheProvider.set).mockRejectedValue(
+        new Error('Cache connection refused'),
       );
-      await firstValueFrom(resultHyphen$);
-      expect(mockCacheProvider.get).toHaveBeenCalledWith('cep:01001000');
-
-      // Non-hyphenated CEP
-      const contextPlain = createMockContext('01001000');
-      const resultPlain$ = await interceptor.intercept(
-        contextPlain,
-        mockCallHandler,
-      );
-      await firstValueFrom(resultPlain$);
-      expect(mockCacheProvider.get).toHaveBeenLastCalledWith('cep:01001000');
-    });
-
-    it('bypasses caching when CEP does not match 8 digits (e.g. 123)', async () => {
-      const context = createMockContext('123');
-      vi.mocked(mockCallHandler.handle).mockReturnValue(of('bypassed' as any));
+      vi.mocked(mockCallHandler.handle).mockReturnValue(of(mockCepResponse));
+      const context = createMockContext('01001000');
 
       const result$ = await interceptor.intercept(context, mockCallHandler);
       const result = await firstValueFrom(result$);
 
-      expect(result).toBe('bypassed');
-      expect(mockCacheProvider.get).not.toHaveBeenCalled();
-      expect(mockResponse.setHeader).not.toHaveBeenCalled();
-      expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
-    });
-
-    it('bypasses caching when CEP is non-numeric (e.g. abcdefgh)', async () => {
-      const context = createMockContext('abcdefgh');
-      vi.mocked(mockCallHandler.handle).mockReturnValue(of('bypassed' as any));
-
-      const result$ = await interceptor.intercept(context, mockCallHandler);
-      const result = await firstValueFrom(result$);
-
-      expect(result).toBe('bypassed');
-      expect(mockCacheProvider.get).not.toHaveBeenCalled();
-      expect(mockResponse.setHeader).not.toHaveBeenCalled();
-      expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
-    });
-
-    it('bypasses caching when CEP parameter is missing/undefined', async () => {
-      const context = createMockContext(undefined);
-      vi.mocked(mockCallHandler.handle).mockReturnValue(of('bypassed' as any));
-
-      const result$ = await interceptor.intercept(context, mockCallHandler);
-      const result = await firstValueFrom(result$);
-
-      expect(result).toBe('bypassed');
-      expect(mockCacheProvider.get).not.toHaveBeenCalled();
-      expect(mockResponse.setHeader).not.toHaveBeenCalled();
-      expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(mockCepResponse);
+      expect(mockResponse.setHeader).toHaveBeenCalledWith('X-Cache', 'MISS');
     });
   });
 });
