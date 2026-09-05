@@ -131,5 +131,21 @@ describe('ViaCepProvider', () => {
 
       await expect(provider.find('01001000')).rejects.toThrow(serverError);
     });
+
+    it('should throw ZodError with [VIACEP] prefix when response payload is invalid', async () => {
+      const invalidResponse = {
+        data: {
+          invalid_field: 123,
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      } as AxiosResponse;
+
+      vi.spyOn(httpService, 'get').mockReturnValue(of(invalidResponse));
+
+      await expect(provider.find('01001000')).rejects.toThrow('[VIACEP]');
+    });
   });
 });
