@@ -15,6 +15,10 @@ import { RoundRobinStrategy } from '../../src/shared/strategies/round-robin.stra
 import { validate } from '../../src/shared/config/env.validation';
 import { CepNotFoundException } from '../../src/shared/errors/cep-not-found.exception';
 import { AllProvidersFailedException } from '../../src/shared/errors/all-providers-failed.exception';
+import { CACHE_PROVIDER } from '../../src/shared/cache/cache.constants';
+import { CacheProvider } from '../../src/shared/cache/cache-provider.interface';
+import { LruCacheProvider } from '../../src/shared/cache/lru-cache.provider';
+import { CepCacheInterceptor } from '../../src/modules/cep/presentation/interceptors/cep-cache.interceptor';
 
 describe('CepModule (Integration)', () => {
   let moduleRef: TestingModule;
@@ -116,6 +120,19 @@ describe('CepModule (Integration)', () => {
     it('should correctly resolve CepController', () => {
       expect(controller).toBeDefined();
       expect(controller).toBeInstanceOf(CepController);
+    });
+
+    it('should correctly resolve CACHE_PROVIDER as LruCacheProvider', () => {
+      const cacheProvider = moduleRef.get<CacheProvider>(CACHE_PROVIDER);
+      expect(cacheProvider).toBeDefined();
+      expect(cacheProvider).toBeInstanceOf(LruCacheProvider);
+    });
+
+    it('should correctly resolve CepCacheInterceptor', () => {
+      const interceptor =
+        moduleRef.get<CepCacheInterceptor>(CepCacheInterceptor);
+      expect(interceptor).toBeDefined();
+      expect(interceptor).toBeInstanceOf(CepCacheInterceptor);
     });
   });
 
