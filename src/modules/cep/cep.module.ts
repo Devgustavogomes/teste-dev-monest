@@ -5,7 +5,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { ViaCepProvider } from './infrastructure/providers/viacep.provider';
 import { BrasilApiProvider } from './infrastructure/providers/brasilapi.provider';
 import { Env } from '../../shared/config/env.validation';
-import { BuscarCepUseCase } from './application/use-cases/buscar-cep.use-case';
+import { FindCepUseCase } from './application/use-cases/find-cep.use-case';
 import { CepController } from './presentation/controllers/cep.controller';
 import { CEP_PROVIDERS } from './cep.constants';
 import { RoundRobinStrategy } from '../../shared/strategies/round-robin.strategy';
@@ -76,7 +76,7 @@ import { TelemetryMetricsService } from '../../shared/observability/telemetry-me
         new RoundRobinStrategy(providers),
       inject: [CEP_PROVIDERS],
     },
-    BuscarCepUseCase,
+    FindCepUseCase,
     {
       provide: CACHE_PROVIDER,
       useClass: LruCacheProvider,
