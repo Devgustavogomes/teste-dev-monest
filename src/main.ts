@@ -1,8 +1,8 @@
-import { NestFactory } from "@nestjs/core";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { patchNestJsSwagger } from "nestjs-zod";
-import { AppModule } from "./app.module";
-import { GlobalExceptionFilter } from "./shared/filters/global-exception.filter";
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { patchNestJsSwagger } from 'nestjs-zod';
+import { AppModule } from './app.module';
+import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
 
 patchNestJsSwagger();
 
@@ -11,20 +11,20 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  const port = process.env["PORT"] ? parseInt(process.env["PORT"], 10) : 3000;
+  const port = process.env['PORT'] ? parseInt(process.env['PORT'], 10) : 3000;
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle("API CEP")
+    .setTitle('API CEP')
     .setDescription(
-      "REST API for Brazilian ZIP code (CEP) lookup with round-robin and automatic fallback across multiple providers.",
+      'REST API for Brazilian ZIP code (CEP) lookup with round-robin and automatic fallback across multiple providers.',
     )
-    .setVersion("1.0")
-    .addTag("cep", "CEP lookup endpoints")
-    .addTag("health", "Application health check")
+    .setVersion('1.0')
+    .addTag('cep', 'CEP lookup endpoints')
+    .addTag('health', 'Application health check')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup("api/docs", app, document);
+  SwaggerModule.setup('api/docs', app, document);
 
   await app.listen(port);
 

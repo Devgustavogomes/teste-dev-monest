@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # codeforge internals
 .codeforge
 
@@ -20,3 +21,9 @@ coverage
 # OS
 .DS_Store
 Thumbs.db
+=======
+.codeforge 
+node_modules
+dist
+.env
+>>>>>>> main
