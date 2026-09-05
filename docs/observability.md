@@ -81,13 +81,40 @@ Implementado em `src/shared/observability/telemetry-metrics.service.ts`, registr
 
 | Nome da Métrica | Tipo OTel | Atributos (Labels) | Finalidade Operacional |
 | :--- | :---: | :--- | :--- |
-| `cep_requests_total` | Counter | `provider`, `status` (`success`, `fallback`, `not_found`, `error`) | Mede taxa de sucesso e fallbacks por provedor em tempo real. |
+| `cep_requests_total` | Counter | `provider`, `status` (`success`, `fallback`, `not_found`, `error`, `contract_violation`) | Mede taxa de sucesso, fallbacks e quebras críticas de contrato por provedor. |
 | `cep_cache_requests_total` | Counter | `result` (`hit`, `miss`, `negative_hit`) | Permite calcular o **Cache Hit Ratio** e a eficácia do Negative Caching. |
 | `circuit_breaker_state` | UpDownCounter | `provider` | Monitora o estado da proteção: `0=Closed`, `1=Open`, `2=Half-Open`. |
 
 ### Princípio de Não-Ruptura
 Todas as operações de registro de métricas são envolvidas em blocos `try/catch` defensivos:
 > **A telemetria nunca pode interromper ou falhar uma requisição de negócio do usuário.**
+
+---
+
+### Detecção e Alertas para Quebra de Contrato (`ProviderContractException`)
+
+Quando um provedor externo altera seu formato de resposta sem aviso prévio, a falha é tratada de forma estrita via Zod `safeParse` e lança a exceção personalizada `ProviderContractException`. O caso de uso (`FindCepUseCase`) registra:
+
+1. **Log com severidade `ERROR`** contendo o código `PROVIDER_CONTRACT_VIOLATION` e a lista estruturada de `issues`.
+2. **Métrica com status `contract_violation`** em `cep_requests_total`.
+
+#### Exemplos de Regras de Alerta Externas:
+
+- **Prometheus (Alertmanager):**
+  ```yaml
+  - alert: ExternalProviderContractViolation
+    expr: sum(rate(cep_requests_total{status="contract_violation"}[1m])) > 0
+    for: 0m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Quebra crítica de contrato detectada no provedor {{ $labels.provider }}"
+  ```
+
+- **Grafana Loki (LogQL):**
+  ```logql
+  sum(rate({app="api-cep"} |= "PROVIDER_CONTRACT_VIOLATION" [1m])) > 0
+  ```
 
 ---
 
