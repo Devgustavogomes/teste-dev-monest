@@ -116,7 +116,7 @@ Executa as baterias de testes automatizados com base no **Vitest** e **SWC** (`u
 #### A. Job `unit-tests` (Testes Unitários)
 
 - **Comando:** `npm run test:unit` (`vitest run test/unit`)
-- **Objetivo:** Valida isoladamente a lógica de domínio, casos de uso (`BuscarCepUseCase`), estratégias de fallback, providers externos com mocks e o mecanismo de cache em memória (`LruCacheProvider`).
+- **Objetivo:** Valida isoladamente a lógica de domínio, casos de uso (`FindCepUseCase`), estratégias de fallback, providers externos com mocks e o mecanismo de cache em memória (`LruCacheProvider`).
 
 #### B. Job `integration-tests` (Testes de Integração)
 

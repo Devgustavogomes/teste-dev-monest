@@ -6,6 +6,7 @@ import { of, throwError } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
 import { ViaCepProvider } from '../../../src/modules/cep/infrastructure/providers/viacep.provider';
 import { Env } from '../../../src/shared/config/env.validation';
+import { ProviderContractException } from '../../../src/shared/errors/provider-contract.exception';
 
 describe('ViaCepProvider', () => {
   let provider: ViaCepProvider;
@@ -157,7 +158,7 @@ describe('ViaCepProvider', () => {
       await expect(provider.find('01001000')).rejects.toThrow(clientError);
     });
 
-    it('should throw ZodError with [VIACEP] prefix when response payload is invalid', async () => {
+    it('should throw ProviderContractException with [VIACEP] prefix when response payload is invalid', async () => {
       const invalidResponse = {
         data: {
           invalid_field: 123,
@@ -170,6 +171,9 @@ describe('ViaCepProvider', () => {
 
       vi.spyOn(httpService, 'get').mockReturnValue(of(invalidResponse));
 
+      await expect(provider.find('01001000')).rejects.toThrow(
+        ProviderContractException,
+      );
       await expect(provider.find('01001000')).rejects.toThrow('[VIACEP]');
     });
   });

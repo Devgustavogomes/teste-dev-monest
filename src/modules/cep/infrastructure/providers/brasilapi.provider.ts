@@ -38,7 +38,7 @@ export class BrasilApiProvider extends BaseHttpCepProvider {
       return null;
     }
 
-    const data = brasilApiResponseSchema.parse(rawData);
+    const data = this.validateResponse(brasilApiResponseSchema, rawData);
 
     return {
       cep: data.cep.replace('-', ''),

@@ -1,7 +1,7 @@
 import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { zodToOpenAPI } from 'nestjs-zod';
-import { BuscarCepUseCase } from '../../application/use-cases/buscar-cep.use-case';
+import { FindCepUseCase } from '../../application/use-cases/find-cep.use-case';
 import { CepResponse, CepResponseSchema } from '../schemas/cep-response.schema';
 import { cepSchema } from '../schemas/cep-param.schema';
 import { ZodValidationPipe } from '../../../../shared/pipes/zod-validation.pipe';
@@ -11,7 +11,7 @@ import { CepCacheInterceptor } from '../interceptors/cep-cache.interceptor';
 @Controller('cep')
 @UseInterceptors(CepCacheInterceptor)
 export class CepController {
-  constructor(private readonly buscarCepUseCase: BuscarCepUseCase) {}
+  constructor(private readonly findCepUseCase: FindCepUseCase) {}
 
   @Get(':cep')
   @ApiOperation({
@@ -48,6 +48,6 @@ export class CepController {
   async findOne(
     @Param('cep', new ZodValidationPipe(cepSchema)) cep: string,
   ): Promise<CepResponse> {
-    return this.buscarCepUseCase.execute(cep);
+    return this.findCepUseCase.execute(cep);
   }
 }

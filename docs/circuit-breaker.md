@@ -53,7 +53,7 @@ O opossum gerencia três estados fundamentais:
 ```
 
 1. **Closed (Fechado):** Estado padrão. Todas as chamadas para o método `find(cep)` são executadas normalmente contra o serviço externo. O opossum monitora a janela deslizante de erros.
-2. **Open (Aberto):** Se a taxa de erros ultrapassar o percentual configurado (`CB_ERROR_THRESHOLD_PERCENTAGE`) e houver o volume mínimo de requisições (`CB_VOLUME_THRESHOLD`), o circuito abre. Toda nova tentativa falha instantaneamente via rejeição rápida (_fail-fast_), caindo no mecanismo de fallback do `BuscarCepUseCase`.
+2. **Open (Aberto):** Se a taxa de erros ultrapassar o percentual configurado (`CB_ERROR_THRESHOLD_PERCENTAGE`) e houver o volume mínimo de requisições (`CB_VOLUME_THRESHOLD`), o circuito abre. Toda nova tentativa falha instantaneamente via rejeição rápida (_fail-fast_), caindo no mecanismo de fallback do `FindCepUseCase`.
 3. **Half-Open (Semi-Aberto):** Expirado o tempo de espera (`CB_RESET_TIMEOUT_MS`), o disjuntor permite que uma requisição piloto passe:
    - Se responder com sucesso, o circuito fecha (**Closed**) e zera as métricas de falha.
    - Se falhar, o circuito reabre imediatamente (**Open**) por mais um ciclo de `CB_RESET_TIMEOUT_MS`.
@@ -66,7 +66,7 @@ A solução foi desenvolvida respeitando **Clean Architecture** e princípios **
 
 ```
                             ┌────────────────────────┐
-                            │   BuscarCepUseCase     │
+                            │     FindCepUseCase     │
                             └───────────┬────────────┘
                                         │
                                         │ consome CepProvider[]
@@ -163,9 +163,9 @@ Nem todo retorno negativo de uma API externa é considerado uma falha de infraes
 | **Erro de DNS / Conexão recusada**  | Lança `AxiosError`          |              ✅ **Sim**               | Quebra de conectividade de rede.                                             |
 | **Circuito ABERTO**                 | Lança `Error` imediatamente |            N/A (já aberto)            | Fail-fast: a requisição é interceptada antes de ir à rede.                   |
 
-### Fluxo no `BuscarCepUseCase`
+### Fluxo no `FindCepUseCase`
 
-O `BuscarCepUseCase` itera sobre a sequência ordenada pelo `RoundRobinStrategy`:
+O `FindCepUseCase` itera sobre a sequência ordenada pelo `RoundRobinStrategy`:
 
 ```typescript
 for (const provider of providers) {

@@ -61,7 +61,7 @@ A solução foi desenvolvida seguindo os princípios **SOLID**, em especial a **
         ┌─────────────────┘               └────────────────┐
         ▼                                                  ▼
 ┌───────────────────┐                             ┌───────────────────┐
-│ Retorna Resposta  │                             │  BuscarCepUseCase │
+│ Retorna Resposta  │                             │   FindCepUseCase  │
 │  (X-Cache: HIT)   │                             │  (Round Robin &   │
 └───────────────────┘                             │     Fallback)     │
                                                   └─────────┬─────────┘
