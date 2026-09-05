@@ -9,6 +9,10 @@ import { CepController } from './presentation/controllers/cep.controller';
 import { CEP_PROVIDERS } from './cep.constants';
 import { RoundRobinStrategy } from '../../shared/strategies/round-robin.strategy';
 import { CepProvider } from './domain/interfaces/cep-provider.interface';
+import { CACHE_PROVIDER } from '../../shared/cache/cache.constants';
+import { LruCacheProvider } from '../../shared/cache/lru-cache.provider';
+import { CepCacheInterceptor } from './presentation/interceptors/cep-cache.interceptor';
+
 
 @Module({
   imports: [
@@ -39,6 +43,11 @@ import { CepProvider } from './domain/interfaces/cep-provider.interface';
       inject: [CEP_PROVIDERS],
     },
     BuscarCepUseCase,
+    {
+      provide: CACHE_PROVIDER,
+      useClass: LruCacheProvider,
+    },
+    CepCacheInterceptor,
   ],
 })
 export class CepModule {}
