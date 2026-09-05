@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpService } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
@@ -19,6 +19,7 @@ import { CACHE_PROVIDER } from '../../src/shared/cache/cache.constants';
 import { CacheProvider } from '../../src/shared/cache/cache-provider.interface';
 import { LruCacheProvider } from '../../src/shared/cache/lru-cache.provider';
 import { CepCacheInterceptor } from '../../src/modules/cep/presentation/interceptors/cep-cache.interceptor';
+import { CircuitBreakerCepProvider } from '../../src/shared/circuit-breaker/circuit-breaker-cep-provider';
 
 describe('CepModule (Integration)', () => {
   let moduleRef: TestingModule;
@@ -88,6 +89,18 @@ describe('CepModule (Integration)', () => {
     controller = moduleRef.get<CepController>(CepController);
   });
 
+  afterEach(async () => {
+    // Shutdown any open opossum circuit breaker timers to prevent test hangs
+    if (providersList) {
+      for (const provider of providersList) {
+        if (provider instanceof CircuitBreakerCepProvider) {
+          provider.circuit.shutdown();
+        }
+      }
+    }
+    await moduleRef?.close();
+  });
+
   describe('Dependency Injection & Module Wiring', () => {
     it('should correctly resolve BuscarCepUseCase from the module', () => {
       expect(useCase).toBeDefined();
@@ -109,12 +122,18 @@ describe('CepModule (Integration)', () => {
       expect(brasilApiProvider.name).toBe('BrasilAPI');
     });
 
-    it('should correctly resolve CEP_PROVIDERS injection token with both providers in order', () => {
+    it('should correctly resolve CEP_PROVIDERS injection token with both providers wrapped in CircuitBreakerCepProvider', () => {
       expect(providersList).toBeDefined();
       expect(Array.isArray(providersList)).toBe(true);
       expect(providersList).toHaveLength(2);
-      expect(providersList[0]).toBe(viaCepProvider);
-      expect(providersList[1]).toBe(brasilApiProvider);
+
+      // After TASK-003, each provider is wrapped in CircuitBreakerCepProvider
+      expect(providersList[0]).toBeInstanceOf(CircuitBreakerCepProvider);
+      expect(providersList[1]).toBeInstanceOf(CircuitBreakerCepProvider);
+
+      // The wrapper names encode the original provider names
+      expect(providersList[0].name).toContain('ViaCEP');
+      expect(providersList[1].name).toContain('BrasilAPI');
     });
 
     it('should correctly resolve CepController', () => {
@@ -278,6 +297,104 @@ describe('CepModule (Integration)', () => {
         AllProvidersFailedException,
       );
       expect(mockHttpService.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('Circuit Breaker Fail-Fast Behavior', () => {
+    /**
+     * This test group validates that once both circuit breakers are tripped open,
+     * the use case rejects with AllProvidersFailedException WITHOUT calling HttpService.
+     *
+     * Strategy: bootstrap a dedicated module with very low CB thresholds
+     * (volumeThreshold=2, errorThresholdPercentage=50) so we can open both circuits
+     * with just 2 failed calls each, then verify fail-fast on the next call.
+     */
+
+    let cbModuleRef: TestingModule;
+    let cbUseCase: BuscarCepUseCase;
+    let cbProvidersList: CepProvider[];
+    let cbMockHttpService: { get: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      // Override CB env to minimal thresholds for fast circuit opening
+      process.env.CB_VOLUME_THRESHOLD = '2';
+      process.env.CB_ERROR_THRESHOLD_PERCENTAGE = '50';
+      process.env.CB_RESET_TIMEOUT_MS = '30000';
+
+      cbMockHttpService = { get: vi.fn() };
+
+      cbModuleRef = await Test.createTestingModule({
+        imports: [
+          ConfigModule.forRoot({
+            isGlobal: true,
+            validate,
+            ignoreEnvFile: true, // use process.env only
+          }),
+          CepModule,
+        ],
+      })
+        .overrideProvider(HttpService)
+        .useValue(cbMockHttpService)
+        .compile();
+
+      cbUseCase = cbModuleRef.get<BuscarCepUseCase>(BuscarCepUseCase);
+      cbProvidersList = cbModuleRef.get<CepProvider[]>(CEP_PROVIDERS);
+    });
+
+    afterEach(async () => {
+      // Shutdown circuit breakers to prevent hanging timers
+      if (cbProvidersList) {
+        for (const provider of cbProvidersList) {
+          if (provider instanceof CircuitBreakerCepProvider) {
+            provider.circuit.shutdown();
+          }
+        }
+      }
+      await cbModuleRef?.close();
+
+      // Restore env
+      delete process.env.CB_VOLUME_THRESHOLD;
+      delete process.env.CB_ERROR_THRESHOLD_PERCENTAGE;
+      delete process.env.CB_RESET_TIMEOUT_MS;
+    });
+
+    it('should reject instantly (fail-fast) without calling HttpService once both circuits are open', async () => {
+      const technicalError = new AxiosError(
+        'Internal Server Error',
+        'ERR_BAD_RESPONSE',
+        undefined,
+        undefined,
+        { status: 500 } as any,
+      );
+
+      // Always throw a technical error so the circuit breakers accumulate failures.
+      // With volumeThreshold=2 and errorThresholdPercentage=50, each circuit opens
+      // after 2 failed calls in the rolling window.
+      cbMockHttpService.get.mockReturnValue(
+        throwError(() => technicalError),
+      );
+
+      // Trip both circuits by sending enough requests so every provider fails.
+      // Each call tries all providers in round-robin; we need each circuit to see
+      // at least `volumeThreshold` failures. Making 4 attempts is sufficient.
+      const warmupAttempts = 4;
+      for (let i = 0; i < warmupAttempts; i++) {
+        await cbUseCase.execute('01001000').catch(() => {
+          /* expected to fail */
+        });
+      }
+
+      // After tripping, reset the spy call count so we can assert no further HTTP calls are made
+      cbMockHttpService.get.mockClear();
+
+      // Now both circuits are open — the next call must fail-fast
+      await expect(cbUseCase.execute('01001000')).rejects.toThrow(
+        AllProvidersFailedException,
+      );
+
+      // Critical assertion: HttpService was NOT called because the open circuits
+      // rejected immediately without forwarding to the real providers
+      expect(cbMockHttpService.get).not.toHaveBeenCalled();
     });
   });
 });

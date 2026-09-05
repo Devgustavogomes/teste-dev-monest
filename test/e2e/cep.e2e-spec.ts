@@ -167,4 +167,34 @@ describe('CepController (e2e — real external APIs)', () => {
     expect(xCache1?.toUpperCase()).toBe('HIT');
     expect(xCache2?.toUpperCase()).toBe('HIT');
   }, 15000);
+
+  /**
+   * Circuit Breaker — Transparency (e2e)
+   *
+   * The open-circuit fail-fast behavior is validated at the integration level
+   * (test/integration/cep.module.spec.ts) where HttpService can be mocked and
+   * CB thresholds can be set to minimal values for deterministic testing.
+   *
+   * Here we simply confirm that the circuit breaker wrapper does NOT break the
+   * normal happy-path flow when real external APIs are available.
+   */
+  describe('Circuit Breaker — transparent with real external APIs', () => {
+    it('should serve CEP requests successfully through circuit-breaker-wrapped providers', async () => {
+      // The fact that the app started and this request succeeds proves that the
+      // CircuitBreakerCepProvider decorators are correctly wired and transparent
+      // when the underlying providers are healthy.
+      const response = await request(app.getHttpServer())
+        .get('/cep/01001000')
+        .expect(200)
+        .expect('Content-Type', /json/);
+
+      expect(response.body).toMatchObject({
+        cep: '01001000',
+        city: 'São Paulo',
+        state: 'SP',
+      });
+      expect(response.body.street).toBeDefined();
+      expect(response.body.neighborhood).toBeDefined();
+    }, 15000);
+  });
 });

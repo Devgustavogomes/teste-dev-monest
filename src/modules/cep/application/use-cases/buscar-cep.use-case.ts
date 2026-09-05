@@ -23,7 +23,7 @@ export class BuscarCepUseCase {
 
         notFound = true;
       } catch {
-        // Falha técnica no provider (timeout, network, 5xx) — tenta o próximo
+        // Fail fast, try the next provider
       }
     }
 
