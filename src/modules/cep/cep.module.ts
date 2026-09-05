@@ -14,6 +14,8 @@ import { CACHE_PROVIDER } from '../../shared/cache/cache.constants';
 import { LruCacheProvider } from '../../shared/cache/lru-cache.provider';
 import { CepCacheInterceptor } from './presentation/interceptors/cep-cache.interceptor';
 import { CircuitBreakerCepProvider } from '../../shared/circuit-breaker/circuit-breaker-cep-provider';
+import { ObservabilityModule } from '../../shared/observability/observability.module';
+import { TelemetryMetricsService } from '../../shared/observability/telemetry-metrics.service';
 
 @Module({
   imports: [
@@ -24,6 +26,7 @@ import { CircuitBreakerCepProvider } from '../../shared/circuit-breaker/circuit-
         timeout: configService.get('CEP_PROVIDER_TIMEOUT_MS', { infer: true }),
       }),
     }),
+    ObservabilityModule,
   ],
   controllers: [CepController],
   providers: [
@@ -36,6 +39,7 @@ import { CircuitBreakerCepProvider } from '../../shared/circuit-breaker/circuit-
         brasilApi: BrasilApiProvider,
         configService: ConfigService<Env, true>,
         logger: PinoLogger,
+        telemetryMetrics: TelemetryMetricsService,
       ) => {
         const options = {
           errorThresholdPercentage: configService.get(
@@ -54,10 +58,17 @@ import { CircuitBreakerCepProvider } from '../../shared/circuit-breaker/circuit-
         };
         const providers: CepProvider[] = [viaCep, brasilApi];
         return providers.map(
-          (p) => new CircuitBreakerCepProvider(p, options, logger),
+          (p) =>
+            new CircuitBreakerCepProvider(p, options, logger, telemetryMetrics),
         );
       },
-      inject: [ViaCepProvider, BrasilApiProvider, ConfigService, PinoLogger],
+      inject: [
+        ViaCepProvider,
+        BrasilApiProvider,
+        ConfigService,
+        PinoLogger,
+        TelemetryMetricsService,
+      ],
     },
     {
       provide: RoundRobinStrategy,

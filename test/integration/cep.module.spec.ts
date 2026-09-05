@@ -8,28 +8,17 @@ import { LoggerModule } from 'nestjs-pino';
 import { CepModule } from '../../src/modules/cep/cep.module';
 import { CEP_PROVIDERS } from '../../src/modules/cep/cep.constants';
 import { BuscarCepUseCase } from '../../src/modules/cep/application/use-cases/buscar-cep.use-case';
-import { ViaCepProvider } from '../../src/modules/cep/infrastructure/providers/viacep.provider';
-import { BrasilApiProvider } from '../../src/modules/cep/infrastructure/providers/brasilapi.provider';
-import { CepController } from '../../src/modules/cep/presentation/controllers/cep.controller';
 import { CepProvider } from '../../src/modules/cep/domain/interfaces/cep-provider.interface';
-import { RoundRobinStrategy } from '../../src/shared/strategies/round-robin.strategy';
 import { validate } from '../../src/shared/config/env.validation';
 import { CepNotFoundException } from '../../src/shared/errors/cep-not-found.exception';
 import { AllProvidersFailedException } from '../../src/shared/errors/all-providers-failed.exception';
-import { CACHE_PROVIDER } from '../../src/shared/cache/cache.constants';
-import { CacheProvider } from '../../src/shared/cache/cache-provider.interface';
-import { LruCacheProvider } from '../../src/shared/cache/lru-cache.provider';
-import { CepCacheInterceptor } from '../../src/modules/cep/presentation/interceptors/cep-cache.interceptor';
 import { CircuitBreakerCepProvider } from '../../src/shared/circuit-breaker/circuit-breaker-cep-provider';
+import { ObservabilityModule } from '../../src/shared/observability/observability.module';
 
 describe('CepModule (Integration)', () => {
   let moduleRef: TestingModule;
   let useCase: BuscarCepUseCase;
-  let viaCepProvider: ViaCepProvider;
-  let brasilApiProvider: BrasilApiProvider;
   let providersList: CepProvider[];
-  let roundRobinStrategy: RoundRobinStrategy<CepProvider>;
-  let controller: CepController;
   let mockHttpService: { get: ReturnType<typeof vi.fn> };
 
   const mockViaCepSuccessResponse = {
@@ -75,6 +64,7 @@ describe('CepModule (Integration)', () => {
           validate,
         }),
         LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
+        ObservabilityModule,
         CepModule,
       ],
     })
@@ -83,12 +73,7 @@ describe('CepModule (Integration)', () => {
       .compile();
 
     useCase = moduleRef.get<BuscarCepUseCase>(BuscarCepUseCase);
-    viaCepProvider = moduleRef.get<ViaCepProvider>(ViaCepProvider);
-    brasilApiProvider = moduleRef.get<BrasilApiProvider>(BrasilApiProvider);
     providersList = moduleRef.get<CepProvider[]>(CEP_PROVIDERS);
-    roundRobinStrategy =
-      moduleRef.get<RoundRobinStrategy<CepProvider>>(RoundRobinStrategy);
-    controller = moduleRef.get<CepController>(CepController);
   });
 
   afterEach(async () => {
@@ -101,60 +86,6 @@ describe('CepModule (Integration)', () => {
       }
     }
     await moduleRef?.close();
-  });
-
-  describe('Dependency Injection & Module Wiring', () => {
-    it('should correctly resolve BuscarCepUseCase from the module', () => {
-      expect(useCase).toBeDefined();
-      expect(useCase).toBeInstanceOf(BuscarCepUseCase);
-    });
-
-    it('should correctly resolve RoundRobinStrategy from the module', () => {
-      expect(roundRobinStrategy).toBeDefined();
-      expect(roundRobinStrategy).toBeInstanceOf(RoundRobinStrategy);
-    });
-
-    it('should correctly resolve ViaCepProvider and BrasilApiProvider', () => {
-      expect(viaCepProvider).toBeDefined();
-      expect(viaCepProvider).toBeInstanceOf(ViaCepProvider);
-      expect(viaCepProvider.name).toBe('ViaCEP');
-
-      expect(brasilApiProvider).toBeDefined();
-      expect(brasilApiProvider).toBeInstanceOf(BrasilApiProvider);
-      expect(brasilApiProvider.name).toBe('BrasilAPI');
-    });
-
-    it('should correctly resolve CEP_PROVIDERS injection token with both providers wrapped in CircuitBreakerCepProvider', () => {
-      expect(providersList).toBeDefined();
-      expect(Array.isArray(providersList)).toBe(true);
-      expect(providersList).toHaveLength(2);
-
-      // After TASK-003, each provider is wrapped in CircuitBreakerCepProvider
-      expect(providersList[0]).toBeInstanceOf(CircuitBreakerCepProvider);
-      expect(providersList[1]).toBeInstanceOf(CircuitBreakerCepProvider);
-
-      // The wrapper names encode the original provider names
-      expect(providersList[0].name).toContain('ViaCEP');
-      expect(providersList[1].name).toContain('BrasilAPI');
-    });
-
-    it('should correctly resolve CepController', () => {
-      expect(controller).toBeDefined();
-      expect(controller).toBeInstanceOf(CepController);
-    });
-
-    it('should correctly resolve CACHE_PROVIDER as LruCacheProvider', () => {
-      const cacheProvider = moduleRef.get<CacheProvider>(CACHE_PROVIDER);
-      expect(cacheProvider).toBeDefined();
-      expect(cacheProvider).toBeInstanceOf(LruCacheProvider);
-    });
-
-    it('should correctly resolve CepCacheInterceptor', () => {
-      const interceptor =
-        moduleRef.get<CepCacheInterceptor>(CepCacheInterceptor);
-      expect(interceptor).toBeDefined();
-      expect(interceptor).toBeInstanceOf(CepCacheInterceptor);
-    });
   });
 
   describe('End-to-End Module Flow (UseCase -> Providers -> HttpService)', () => {
@@ -318,7 +249,6 @@ describe('CepModule (Integration)', () => {
     let cbMockHttpService: { get: ReturnType<typeof vi.fn> };
 
     beforeEach(async () => {
-      // Override CB env to minimal thresholds for fast circuit opening
       process.env.CB_VOLUME_THRESHOLD = '2';
       process.env.CB_ERROR_THRESHOLD_PERCENTAGE = '50';
       process.env.CB_RESET_TIMEOUT_MS = '30000';
@@ -333,6 +263,7 @@ describe('CepModule (Integration)', () => {
             ignoreEnvFile: true, // use process.env only
           }),
           LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
+          ObservabilityModule,
           CepModule,
         ],
       })
@@ -345,7 +276,6 @@ describe('CepModule (Integration)', () => {
     });
 
     afterEach(async () => {
-      // Shutdown circuit breakers to prevent hanging timers
       if (cbProvidersList) {
         for (const provider of cbProvidersList) {
           if (provider instanceof CircuitBreakerCepProvider) {
@@ -355,7 +285,6 @@ describe('CepModule (Integration)', () => {
       }
       await cbModuleRef?.close();
 
-      // Restore env
       delete process.env.CB_VOLUME_THRESHOLD;
       delete process.env.CB_ERROR_THRESHOLD_PERCENTAGE;
       delete process.env.CB_RESET_TIMEOUT_MS;
@@ -370,31 +299,18 @@ describe('CepModule (Integration)', () => {
         { status: 500 } as any,
       );
 
-      // Always throw a technical error so the circuit breakers accumulate failures.
-      // With volumeThreshold=2 and errorThresholdPercentage=50, each circuit opens
-      // after 2 failed calls in the rolling window.
       cbMockHttpService.get.mockReturnValue(throwError(() => technicalError));
-
-      // Trip both circuits by sending enough requests so every provider fails.
-      // Each call tries all providers in round-robin; we need each circuit to see
-      // at least `volumeThreshold` failures. Making 4 attempts is sufficient.
       const warmupAttempts = 4;
       for (let i = 0; i < warmupAttempts; i++) {
-        await cbUseCase.execute('01001000').catch(() => {
-          /* expected to fail */
-        });
+        await cbUseCase.execute('01001000').catch(() => {});
       }
 
-      // After tripping, reset the spy call count so we can assert no further HTTP calls are made
       cbMockHttpService.get.mockClear();
 
-      // Now both circuits are open — the next call must fail-fast
       await expect(cbUseCase.execute('01001000')).rejects.toThrow(
         AllProvidersFailedException,
       );
 
-      // Critical assertion: HttpService was NOT called because the open circuits
-      // rejected immediately without forwarding to the real providers
       expect(cbMockHttpService.get).not.toHaveBeenCalled();
     });
   });

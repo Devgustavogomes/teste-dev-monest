@@ -14,6 +14,7 @@ import { CACHE_PROVIDER } from '../../../../shared/cache/cache.constants';
 import { CacheProvider } from '../../../../shared/cache/cache-provider.interface';
 import { Env } from '../../../../shared/config/env.validation';
 import { CepNotFoundException } from '../../../../shared/errors/cep-not-found.exception';
+import { TelemetryMetricsService } from '../../../../shared/observability/telemetry-metrics.service';
 
 @Injectable()
 export class CepCacheInterceptor implements NestInterceptor {
@@ -24,6 +25,7 @@ export class CepCacheInterceptor implements NestInterceptor {
     @Inject(CACHE_PROVIDER) private readonly cacheProvider: CacheProvider,
     configService: ConfigService<Env, true>,
     private readonly logger: PinoLogger,
+    private readonly telemetryMetrics?: TelemetryMetricsService,
   ) {
     this.logger.setContext(CepCacheInterceptor.name);
     this.cacheTtlMs = configService.get('CACHE_TTL_MS', { infer: true });
@@ -56,13 +58,18 @@ export class CepCacheInterceptor implements NestInterceptor {
       );
 
       if (this.isNegativeCache(cachedValue)) {
+        this.telemetryMetrics?.incrementCacheRequests('negative_hit');
         throw new CepNotFoundException(normalizedCep);
       }
 
+      this.telemetryMetrics?.incrementCacheRequests('hit');
       return of(cachedValue);
     }
 
+    this.telemetryMetrics?.incrementCacheRequests('miss');
+
     response.setHeader('X-Cache', 'MISS');
+
     this.logger.info(
       { cep: normalizedCep, cache: 'MISS' },
       `Cache MISS for CEP ${normalizedCep}`,

@@ -1,3 +1,5 @@
+import './instrumentation';
+
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger, PinoLogger } from 'nestjs-pino';

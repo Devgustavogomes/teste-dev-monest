@@ -5,12 +5,14 @@ import { CepResponse } from '../../presentation/schemas/cep-response.schema';
 import { RoundRobinStrategy } from '../../../../shared/strategies/round-robin.strategy';
 import { CepNotFoundException } from '../../../../shared/errors/cep-not-found.exception';
 import { AllProvidersFailedException } from '../../../../shared/errors/all-providers-failed.exception';
+import { TelemetryMetricsService } from '../../../../shared/observability/telemetry-metrics.service';
 
 @Injectable()
 export class BuscarCepUseCase {
   constructor(
     private readonly roundRobin: RoundRobinStrategy<CepProvider>,
     private readonly logger: PinoLogger,
+    private readonly telemetryMetrics?: TelemetryMetricsService,
   ) {
     this.logger.setContext(BuscarCepUseCase.name);
   }
@@ -25,6 +27,7 @@ export class BuscarCepUseCase {
         const result = await provider.find(cep);
 
         if (result !== null) {
+          this.telemetryMetrics?.incrementCepRequests(provider.name, 'success');
           const durationMs = Math.round(performance.now() - startTime);
           this.logger.info(
             { provider: provider.name, cep, durationMs },
@@ -33,8 +36,11 @@ export class BuscarCepUseCase {
           return result;
         }
 
+        this.telemetryMetrics?.incrementCepRequests(provider.name, 'not_found');
+
         notFound = true;
       } catch (error) {
+        this.telemetryMetrics?.incrementCepRequests(provider.name, 'fallback');
         const durationMs = Math.round(performance.now() - startTime);
         this.logger.warn(
           {
