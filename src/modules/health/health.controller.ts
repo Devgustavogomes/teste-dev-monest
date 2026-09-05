@@ -18,7 +18,8 @@ export class HealthController {
   @Get()
   @ApiOperation({
     summary: 'Application health check',
-    description: 'Returns { status: "ok" } with HTTP 200 if the application is running.',
+    description:
+      'Returns { status: "ok" } with HTTP 200 if the application is running.',
   })
   @ApiResponse({
     status: 200,

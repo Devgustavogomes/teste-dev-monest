@@ -78,7 +78,11 @@ describe('GlobalExceptionFilter', () => {
     });
 
     it('should format custom AppError instance correctly', () => {
-      const exception = new AppError(422, 'Custom unprocessable entity', 'Unprocessable Entity');
+      const exception = new AppError(
+        422,
+        'Custom unprocessable entity',
+        'Unprocessable Entity',
+      );
 
       filter.catch(exception, mockHost);
 
@@ -96,7 +100,10 @@ describe('GlobalExceptionFilter', () => {
 
   describe('Standard NestJS HttpException', () => {
     it('should format HttpException with string response', () => {
-      const exception = new HttpException('Forbidden resource', HttpStatus.FORBIDDEN);
+      const exception = new HttpException(
+        'Forbidden resource',
+        HttpStatus.FORBIDDEN,
+      );
 
       filter.catch(exception, mockHost);
 
@@ -166,7 +173,10 @@ describe('GlobalExceptionFilter', () => {
     });
 
     it('should fallback to HTTP status name when response is neither string nor object', () => {
-      const exception = new HttpException(12345 as any, HttpStatus.UNAUTHORIZED);
+      const exception = new HttpException(
+        12345 as any,
+        HttpStatus.UNAUTHORIZED,
+      );
 
       filter.catch(exception, mockHost);
 
