@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { PinoLogger } from 'nestjs-pino';
 import { BuscarCepUseCase } from '../../../src/modules/cep/application/use-cases/buscar-cep.use-case';
 import { CepProvider } from '../../../src/modules/cep/domain/interfaces/cep-provider.interface';
 import { CepResponse } from '../../../src/modules/cep/presentation/schemas/cep-response.schema';
-import { CepNotFoundException } from '../../../src/shared/errors/cep-not-found.exception';
-import { AllProvidersFailedException } from '../../../src/shared/errors/all-providers-failed.exception';
 import { RoundRobinStrategy } from '../../../src/shared/strategies/round-robin.strategy';
+import { AllProvidersFailedException } from '../../../src/shared/errors/all-providers-failed.exception';
+import { CepNotFoundException } from '../../../src/shared/errors/cep-not-found.exception';
 
 describe('BuscarCepUseCase', () => {
   let provider1: CepProvider;
@@ -23,12 +24,12 @@ describe('BuscarCepUseCase', () => {
 
   const sampleCepResponse2: CepResponse = {
     cep: '01001000',
-    street: 'Praça da Sé',
+    street: 'Praça da Sé Provider 2',
     complement: '',
     neighborhood: 'Sé',
     city: 'São Paulo',
     state: 'SP',
-    ibge: '',
+    ibge: '3550308',
   };
 
   beforeEach(() => {
@@ -42,8 +43,17 @@ describe('BuscarCepUseCase', () => {
       find: vi.fn(),
     };
 
+    const dummyLogger = {
+      setContext: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as PinoLogger;
+
     useCase = new BuscarCepUseCase(
       new RoundRobinStrategy([provider1, provider2]),
+      dummyLogger,
     );
   });
 

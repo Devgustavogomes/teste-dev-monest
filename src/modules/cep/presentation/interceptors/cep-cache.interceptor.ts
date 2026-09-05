@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 import { Request, Response } from 'express';
+import { PinoLogger } from 'nestjs-pino';
 import { CACHE_PROVIDER } from '../../../../shared/cache/cache.constants';
 import { CacheProvider } from '../../../../shared/cache/cache-provider.interface';
 import { Env } from '../../../../shared/config/env.validation';
@@ -22,7 +23,9 @@ export class CepCacheInterceptor implements NestInterceptor {
   constructor(
     @Inject(CACHE_PROVIDER) private readonly cacheProvider: CacheProvider,
     configService: ConfigService<Env, true>,
+    private readonly logger: PinoLogger,
   ) {
+    this.logger.setContext(CepCacheInterceptor.name);
     this.cacheTtlMs = configService.get('CACHE_TTL_MS', { infer: true });
     this.cacheNegativeTtlMs = configService.get('CACHE_NEGATIVE_TTL_MS', {
       infer: true,
@@ -47,6 +50,10 @@ export class CepCacheInterceptor implements NestInterceptor {
 
     if (cachedValue !== null && cachedValue !== undefined) {
       response.setHeader('X-Cache', 'HIT');
+      this.logger.info(
+        { cep: normalizedCep, cache: 'HIT' },
+        `Cache HIT for CEP ${normalizedCep}`,
+      );
 
       if (this.isNegativeCache(cachedValue)) {
         throw new CepNotFoundException(normalizedCep);
@@ -56,19 +63,44 @@ export class CepCacheInterceptor implements NestInterceptor {
     }
 
     response.setHeader('X-Cache', 'MISS');
+    this.logger.info(
+      { cep: normalizedCep, cache: 'MISS' },
+      `Cache MISS for CEP ${normalizedCep}`,
+    );
 
     return next.handle().pipe(
       tap((data) => {
-        this.cacheProvider.set(cacheKey, data, this.cacheTtlMs).catch(() => {
-      // Falha na gravação do cache não deve interromper a entrega da resposta ao cliente
-    });
+        void this.cacheProvider
+          .set(cacheKey, data, this.cacheTtlMs)
+          .catch((err: unknown) => {
+            this.logger.warn(
+              {
+                cep: normalizedCep,
+                cacheKey,
+                error: err instanceof Error ? err.message : String(err),
+              },
+              'Failed to save entry to cache',
+            );
+          });
       }),
       catchError((err: unknown) => {
         if (err instanceof CepNotFoundException) {
           response.setHeader('X-Cache', 'MISS');
-          void this.cacheProvider.set(cacheKey, { notFound: true }, this.cacheNegativeTtlMs).catch(() => {
-      // Falha na gravação do cache não deve interromper a entrega da resposta ao cliente
-    });;
+          void this.cacheProvider
+            .set(cacheKey, { notFound: true }, this.cacheNegativeTtlMs)
+            .catch((cacheErr: unknown) => {
+              this.logger.warn(
+                {
+                  cep: normalizedCep,
+                  cacheKey,
+                  error:
+                    cacheErr instanceof Error
+                      ? cacheErr.message
+                      : String(cacheErr),
+                },
+                'Failed to save negative entry to cache',
+              );
+            });
         }
         return throwError(() => err);
       }),
@@ -93,6 +125,4 @@ export class CepCacheInterceptor implements NestInterceptor {
       (value as Record<string, unknown>).notFound === true
     );
   }
-
 }
-

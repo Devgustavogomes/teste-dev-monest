@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
+import { PinoLogger } from 'nestjs-pino';
 import { of, throwError } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
 import { ViaCepProvider } from '../../../src/modules/cep/infrastructure/providers/viacep.provider';
@@ -24,7 +25,15 @@ describe('ViaCepProvider', () => {
       }),
     } as unknown as ConfigService<Env, true>;
 
-    provider = new ViaCepProvider(httpService, configService);
+    const dummyLogger = {
+      setContext: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as PinoLogger;
+
+    provider = new ViaCepProvider(httpService, configService, dummyLogger);
   });
 
   it('should have provider name "ViaCEP"', () => {
@@ -130,6 +139,22 @@ describe('ViaCepProvider', () => {
       );
 
       await expect(provider.find('01001000')).rejects.toThrow(serverError);
+    });
+
+    it('should propagate 4xx HTTP errors from HttpService', async () => {
+      const clientError = new AxiosError(
+        'Request failed with status code 400',
+        'ERR_BAD_REQUEST',
+        undefined,
+        undefined,
+        { status: 400, data: 'Bad Request' } as any,
+      );
+
+      vi.spyOn(httpService, 'get').mockReturnValue(
+        throwError(() => clientError),
+      );
+
+      await expect(provider.find('01001000')).rejects.toThrow(clientError);
     });
 
     it('should throw ZodError with [VIACEP] prefix when response payload is invalid', async () => {

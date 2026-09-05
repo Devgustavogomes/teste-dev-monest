@@ -1,4 +1,5 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { PinoLogger } from 'nestjs-pino';
 import { CircuitBreakerCepProvider } from '../../../src/shared/circuit-breaker/circuit-breaker-cep-provider';
 import { CepProvider } from '../../../src/modules/cep/domain/interfaces/cep-provider.interface';
 import { CepResponse } from '../../../src/modules/cep/presentation/schemas/cep-response.schema';
@@ -31,7 +32,19 @@ describe('CircuitBreakerCepProvider', () => {
 
   beforeEach(() => {
     mockProvider = createMockProvider();
-    decorator = new CircuitBreakerCepProvider(mockProvider, TEST_OPTIONS);
+    const dummyLogger = {
+      setContext: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as PinoLogger;
+
+    decorator = new CircuitBreakerCepProvider(
+      mockProvider,
+      TEST_OPTIONS,
+      dummyLogger,
+    );
   });
 
   afterEach(() => {
@@ -73,17 +86,14 @@ describe('CircuitBreakerCepProvider', () => {
     it('should NOT open the circuit after multiple null responses', async () => {
       vi.mocked(mockProvider.find).mockResolvedValue(null);
 
-      // Call more times than volumeThreshold to ensure the circuit evaluates
       for (let i = 0; i < 5; i++) {
         await decorator.find('99999999');
       }
 
-      // Circuit should still be closed - the next call must reach the provider
       vi.mocked(mockProvider.find).mockResolvedValue(sampleCepResponse);
       const result = await decorator.find('01001000');
 
       expect(result).toEqual(sampleCepResponse);
-      // The provider was called all 6 times (5 nulls + 1 success)
       expect(mockProvider.find).toHaveBeenCalledTimes(6);
     });
   });
@@ -94,13 +104,11 @@ describe('CircuitBreakerCepProvider', () => {
         new Error('Network timeout'),
       );
 
-      // Trip the circuit - volumeThreshold is 1, so a single error is enough
       await expect(decorator.find('01001000')).rejects.toThrow();
 
-      // The circuit should now be open; subsequent calls must fail immediately
-      // without delegating to the wrapped provider
       const callsBeforeOpen = vi.mocked(mockProvider.find).mock.calls.length;
 
+      // The circuit should now be open; subsequent calls must fail immediately
       await expect(decorator.find('01001000')).rejects.toThrow();
 
       // The provider should NOT have been called again (opossum short-circuits)
@@ -112,7 +120,6 @@ describe('CircuitBreakerCepProvider', () => {
 
   describe('Half-open behavior', () => {
     it('should enter half-open after resetTimeout and allow a test call', async () => {
-      // Trip the circuit
       vi.mocked(mockProvider.find).mockRejectedValue(
         new Error('Service unavailable'),
       );

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
+import { PinoLogger } from 'nestjs-pino';
 import { of, throwError } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
 import { BrasilApiProvider } from '../../../src/modules/cep/infrastructure/providers/brasilapi.provider';
@@ -25,7 +26,15 @@ describe('BrasilApiProvider', () => {
       }),
     } as unknown as ConfigService<Env, true>;
 
-    provider = new BrasilApiProvider(httpService, configService);
+    const dummyLogger = {
+      setContext: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as PinoLogger;
+
+    provider = new BrasilApiProvider(httpService, configService, dummyLogger);
   });
 
   it('should have provider name "BrasilAPI"', () => {

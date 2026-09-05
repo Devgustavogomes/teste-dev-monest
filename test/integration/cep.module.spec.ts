@@ -4,6 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { of, throwError } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
+import { LoggerModule } from 'nestjs-pino';
 import { CepModule } from '../../src/modules/cep/cep.module';
 import { CEP_PROVIDERS } from '../../src/modules/cep/cep.constants';
 import { BuscarCepUseCase } from '../../src/modules/cep/application/use-cases/buscar-cep.use-case';
@@ -73,6 +74,7 @@ describe('CepModule (Integration)', () => {
           isGlobal: true,
           validate,
         }),
+        LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
         CepModule,
       ],
     })
@@ -330,6 +332,7 @@ describe('CepModule (Integration)', () => {
             validate,
             ignoreEnvFile: true, // use process.env only
           }),
+          LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
           CepModule,
         ],
       })
@@ -370,9 +373,7 @@ describe('CepModule (Integration)', () => {
       // Always throw a technical error so the circuit breakers accumulate failures.
       // With volumeThreshold=2 and errorThresholdPercentage=50, each circuit opens
       // after 2 failed calls in the rolling window.
-      cbMockHttpService.get.mockReturnValue(
-        throwError(() => technicalError),
-      );
+      cbMockHttpService.get.mockReturnValue(throwError(() => technicalError));
 
       // Trip both circuits by sending enough requests so every provider fails.
       // Each call tries all providers in round-robin; we need each circuit to see

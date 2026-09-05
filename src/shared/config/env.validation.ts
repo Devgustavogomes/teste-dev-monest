@@ -13,6 +13,14 @@ export const envSchema = z.object({
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
 
+  /** Log level for Pino logger. Default: 'info' */
+  LOG_LEVEL: z
+    .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
+    .default('info'),
+
+  /** Application environment mode. Default: 'development' */
+  NODE_ENV: z.string().default('development'),
+
   /** Timeout in milliseconds for each CEP provider HTTP call. Default: 5000 */
   CEP_PROVIDER_TIMEOUT_MS: z
     .string()

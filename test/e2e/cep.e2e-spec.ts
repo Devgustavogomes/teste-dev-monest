@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Logger, PinoLogger } from 'nestjs-pino';
 import { AppModule } from '../../src/app.module';
 import { GlobalExceptionFilter } from '../../src/shared/filters/global-exception.filter';
 
@@ -14,7 +15,9 @@ describe('CepController (e2e — real external APIs)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.useGlobalFilters(new GlobalExceptionFilter());
+    app.useLogger(app.get(Logger));
+    const pinoLogger = await app.resolve(PinoLogger);
+    app.useGlobalFilters(new GlobalExceptionFilter(pinoLogger));
     await app.init();
     await app.listen(0);
   }, 15000);

@@ -4,8 +4,10 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Injectable,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
+import { PinoLogger } from 'nestjs-pino';
 import { AppError } from '../errors/app.error';
 
 interface ErrorDetails {
@@ -14,20 +16,53 @@ interface ErrorDetails {
   error: string;
 }
 
+@Injectable()
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger?: PinoLogger) {
+    this.logger?.setContext(GlobalExceptionFilter.name);
+  }
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
 
-    const { statusCode, message, error } = this.resolveException(exception);
+    const errorDetails = this.resolveException(exception);
 
-    response.status(statusCode).json({
-      statusCode,
-      message,
-      error,
+    this.logException(exception, errorDetails, request);
+
+    response.status(errorDetails.statusCode).json({
+      statusCode: errorDetails.statusCode,
+      message: errorDetails.message,
+      error: errorDetails.error,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private logException(
+    exception: unknown,
+    details: ErrorDetails,
+    request: Request,
+  ): void {
+    if (!this.logger) return;
+
+    const { statusCode, message, error } = details;
+    const basePayload = {
+      statusCode,
+      error,
+      message,
+      path: request?.url,
+      method: request?.method,
+    };
+
+    if (statusCode >= 500) {
+      const err =
+        exception instanceof Error ? exception : new Error(String(exception));
+      this.logger.error({ ...basePayload, err }, message);
+    } else if (statusCode >= 400) {
+      this.logger.warn(basePayload, message);
+    }
   }
 
   private resolveException(exception: unknown): ErrorDetails {
