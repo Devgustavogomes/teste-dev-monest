@@ -1,52 +1,22 @@
-# Arquitetura e Implementação de Cache
+# Arquitetura de Cache
 
-Este documento descreve a arquitetura, as decisões técnicas e o funcionamento da camada de cache implementada na rota `GET /cep/:cep`.
+Este documento descreve a arquitetura, as decisões técnicas e o funcionamento da camada de cache em memória na rota `GET /cep/:cep`.
 
 ---
 
 ## 1. Visão Geral
 
-A camada de cache foi concebida para atuar como uma primeira linha de defesa antes das consultas externas às APIs do **ViaCEP** e **BrasilAPI**.
+A camada de cache atua como primeira linha de defesa antes das consultas externas às APIs (ViaCEP e BrasilAPI):
 
-### Principais Benefícios:
-
-- **Redução drástica de latência:** Requisições em cache respondem em menos de 5ms
-- **Resiliência:** Mesmo que provedores externos sofram instabilidade ou esgotem seus rate limits, consultas repetidas continuam sendo atendidas com sucesso.
-- **Redução de custos e tráfego de rede:** Diminui expressivamente o volume de requisições enviadas a serviços de terceiros.
+- **Baixa Latência:** Respostas com cache hit retornam em menos de **5ms**.
+- **Resiliência:** Mesmo com provedores instáveis ou esgotamento de rate limits externos, consultas repetidas são atendidas com sucesso.
+- **Economia de Rede:** Reduz tráfego de rede e consumo de recursos externos.
 
 ---
 
-## 2. Implementação e Facilidade de Mudança (Extensibilidade)
+## 2. Funcionamento do Interceptor (`CepCacheInterceptor`)
 
-### 2.1. Implementação Padrão com `lru-cache` (`LruCacheProvider`)
-
-A implementação padrão é executada pela classe `LruCacheProvider` utilizando a biblioteca [`lru-cache`](https://www.npmjs.com/package/lru-cache):
-
-- **Algoritmo LRU (_Least Recently Used_):** Mantém as entradas mais recentemente acessadas e descarta automaticamente as menos utilizadas assim que a capacidade máxima (`max: 1000` por padrão) é atingida, prevenindo qualquer risco de vazamento de memória (_memory leak_).
-- **Performance $O(1)$:** Tanto as operações de leitura (`get`), escrita (`set`) quanto a evicção de nós ocorrem em tempo constante $O(1)$.
-- **Controle de TTL por Item:** Cada entrada possui expiração temporal configurada em milissegundos..
-
-### 2.2. Arquitetura Desacoplada: Fácil de Trocar a Qualquer Momento
-
-A camada foi desenhada de forma 100% desacoplada da biblioteca concreta:
-
-- **Baseada em Interface (`CacheProvider`):** O interceptor HTTP e os casos de uso dependem exclusivamente do contrato abstrato `CacheProvider` e do token de injeção `CACHE_PROVIDER`.
-- **Plug-and-Play para Outras Tecnologias:** Caso no futuro seja necessário adotar uma solução de cache distribuído (como **Redis**, **Memcached** ou **DynamoDB**) para atender múltiplos nós da aplicação:
-  1. Basta criar uma nova classe implementando a interface (ex.: `RedisCacheProvider implements CacheProvider`).
-  2. Alterar apenas o provider no módulo `CepModule`:
-     ```typescript
-     {
-       provide: CACHE_PROVIDER,
-       useClass: RedisCacheProvider, // substituição imediata sem alterar regras de negócio
-     }
-     ```
-  3. **Zero impacto:** Nenhuma linha do `CepCacheInterceptor`, dos Casos de Uso ou dos Controllers precisa ser alterada.
-
----
-
-## 3. Arquitetura e Padrões de Projeto
-
-A solução foi desenvolvida seguindo os princípios **SOLID**, em especial a **Inversão de Dependência (DIP)** e o princípio de **Responsabilidade Única (SRP)**.
+Localizado em `src/modules/cep/presentation/interceptors/cep-cache.interceptor.ts`.
 
 ```
                   ┌───────────────────────────────┐
@@ -55,123 +25,84 @@ A solução foi desenvolvida seguindo os princípios **SOLID**, em especial a **
                                  │
                                  ▼
                    ┌────────────────────────────┐
-                   │   CepCacheInterceptor      │
+                   │    CepCacheInterceptor    │
                    └──────┬───────────────┬─────┘
            (Cache Hit)    │               │ (Cache Miss)
         ┌─────────────────┘               └────────────────┐
         ▼                                                  ▼
 ┌───────────────────┐                             ┌───────────────────┐
-│ Retorna Resposta  │                             │   FindCepUseCase  │
-│  (X-Cache: HIT)   │                             │  (Round Robin &   │
-└───────────────────┘                             │     Fallback)     │
-                                                  └─────────┬─────────┘
-                                                            │
-                                                            ▼
-                                                  ┌───────────────────┐
-                                                  │ Provedores (APIs) │
+│ Retorna Resposta  │                             │  FindCepUseCase   │
+│  (X-Cache: HIT)   │                             │ (Round-Robin e    │
+└───────────────────┘                             │   Fallback)       │
                                                   └─────────┬─────────┘
                                                             │ Sucesso / 404
                                                             ▼
                                                   ┌───────────────────┐
                                                   │ Armazena no Cache │
-                                                  │  (X-Cache: MISS)  │
+                                                  │ (X-Cache: MISS)   │
                                                   └───────────────────┘
 ```
 
-### 3.1. Interceptor Pattern (`CepCacheInterceptor`)
-
-Localizado em `src/modules/cep/presentation/interceptors/cep-cache.interceptor.ts`.
-
-- **Por que um Interceptor?** Permite interceptar a requisição antes de atingir o controller/use-case e manipular a resposta pós-execução via operadores RxJS (`tap` e `catchError`), mantendo o Controller e os Use Cases 100% livres de regras de infraestrutura de cache.
-- **Normalização de Chave:** Normaliza o parâmetro `:cep` removendo qualquer caractere não numérico (`01001-000` ➔ `cep:01001000`). Se o CEP não possuir exatamente 8 dígitos numéricos, o interceptor ignora o cache e delega a validação aos pipes e schemas Zod.
-
-### 3.2. Strategy / Adapter Pattern (`CacheProvider`)
-
-Definido em `src/shared/cache/cache-provider.interface.ts`.
-
-- **Contrato Abstrato:**
-  ```typescript
-  export interface CacheProvider {
-    get<T>(key: string): Promise<T | null>;
-    set<T>(key: string, value: T, ttlMs: number): Promise<void>;
-    del(key: string): Promise<void>;
-    clear?(): Promise<void>;
-  }
-  ```
-- **Injeção via Token (`CACHE_PROVIDER`):** O módulo `CepModule` vincula o token `CACHE_PROVIDER` à implementação `LruCacheProvider`. Se no futuro a aplicação migrar para Redis, basta criar uma classe `RedisCacheProvider implements CacheProvider` e registrá-la no módulo, sem modificar uma única linha do `CepCacheInterceptor` ou dos Casos de Uso.
+- **Normalização de Chave:** Normaliza o parâmetro `:cep` removendo hifens e caracteres não numéricos (`01001-000` ➔ `cep:01001000`).
+- **Desacoplamento:** O caso de uso e o controller não contêm código de cache; o ciclo de vida é gerenciado por operadores RxJS (`tap` e `catchError`).
 
 ---
 
-## 4. Negative Caching (Cache de CEPs Inexistentes - 404)
+## 3. Negative Caching (Cache de 404)
 
-Consultar CEPs inválidos ou inexistentes (ex.: `00000000`) consome recursos significativos, pois força a aplicação a executar todo o ciclo de fallback por todas as APIs externas antes de concluir que o CEP não existe.
+Quando um CEP não existe, a aplicação consulta o primeiro provedor e, caso ele não encontre, aciona o **fallback** para consultar o próximo provedor da fila. Se nenhum dos provedores cadastrados encontrar o CEP, o caso de uso conclui que ele realmente não existe e lança `CepNotFoundException` (404).
 
-### Como Funciona:
+Para evitar que essa verificação passe por todos os provedores repetidamente:
 
-1. **Miss Inicial:** A primeira requisição a um CEP inexistente consulta os provedores externos. Todos retornam inexistência e o caso de uso lança `CepNotFoundException` (`404 Not Found`).
-2. **Captura e Gravação:** O operador `catchError` do `CepCacheInterceptor` captura o erro e armazena uma entrada negativa no cache:
-   ```typescript
-   {
-     notFound: true;
-   }
-   ```
-   com um TTL reduzido (`CACHE_NEGATIVE_TTL_MS`, padrão de 10 minutos). O erro é propagado com o cabeçalho `X-Cache: MISS`.
-3. **Hit Subsequente:** Chamadas posteriores para o mesmo CEP encontram a flag `{ notFound: true }` no cache e lançam `CepNotFoundException` de imediato, adicionando o cabeçalho `X-Cache: HIT`, sem realizar nenhuma chamada externa.
-4. **Erros Não Cacheados:** Erros transitórios como falhas de rede ou indisponibilidade de todos os provedores (`AllProvidersFailedException` - `502 Bad Gateway`) **nunca** são cacheados, garantindo que novas tentativas possam ter sucesso assim que as APIs externas se restabelecerem.
+1. **Miss Inicial:** A primeira chamada percorre a cadeia de provedores (com fallback). Como nenhum encontrou, o sistema lança 404.
+2. **Gravação:** O interceptor captura o 404 e grava `{ notFound: true }` no cache com TTL reduzido (`CACHE_NEGATIVE_TTL_MS`, padrão 10 minutos), retornando cabeçalho `X-Cache: MISS`.
+3. **Hit Subsequente:** Chamadas seguintes para o mesmo CEP encontram a flag na memória e devolvem 404 imediatamente (`X-Cache: HIT`), sem acionar nenhum provedor externo.
+4. **Erros Transitórios:** Falhas de rede, timeouts ou erros 5xx (`AllProvidersFailedException`) **não** são armazenados em cache, permitindo que novas tentativas ocorram normalmente.
 
 ---
 
-## 5. Observabilidade: Cabeçalhos HTTP (`X-Cache`)
+## 4. Cabeçalho de Observabilidade (`X-Cache`)
 
-Todas as respostas da rota `/cep/:cep` contêm o cabeçalho HTTP `X-Cache`:
-
-| Valor do Header | Significado                                                                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `X-Cache: HIT`  | A resposta foi entregue diretamente a partir da memória local (tempo < 5ms).                                                                            |
-| `X-Cache: MISS` | A chave não existia no cache. A consulta foi executada nas APIs externas e, em caso de 200 ou 404, o resultado foi armazenado para requisições futuras. |
+| Valor | Significado |
+| :--- | :--- |
+| `X-Cache: HIT` | Resposta servida da memória local (latência < 5ms). |
+| `X-Cache: MISS` | Chave inexistente; consulta realizada nos provedores e resultado gravado no cache. |
 
 ---
 
-## 6. Configuração e Variáveis de Ambiente
+## 5. Extensibilidade (`CacheProvider`)
 
-Os parâmetros de cache são configurados via variáveis de ambiente e validados estritamente no bootstrap com Zod em `src/shared/config/env.validation.ts`:
+A camada utiliza o princípio de Inversão de Dependência via interface `CacheProvider` (`src/shared/cache/cache-provider.interface.ts`):
 
-| Variável                | Tipo             | Padrão            | Descrição                                                            |
-| ----------------------- | ---------------- | ----------------- | -------------------------------------------------------------------- |
-| `CACHE_TTL_MS`          | Inteiro positivo | `86400000` (24h)  | Tempo de vida no cache para CEPs encontrados com sucesso (`200 OK`). |
-| `CACHE_NEGATIVE_TTL_MS` | Inteiro positivo | `600000` (10 min) | Tempo de vida no cache para CEPs inexistentes (`404 Not Found`).     |
-
-### Exemplo no `.env`:
-
-```env
-CACHE_TTL_MS=86400000
-CACHE_NEGATIVE_TTL_MS=600000
+```typescript
+export interface CacheProvider {
+  get<T>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T, ttlMs: number): Promise<void>;
+  del(key: string): Promise<void>;
+  clear?(): Promise<void>;
+}
 ```
 
+- **Implementação Padrão:** `LruCacheProvider` utilizando a biblioteca `lru-cache` (evicção $O(1)$, capacidade máxima configurada para evitar memory leaks).
+- **Migração para Redis:** Basta criar uma classe `RedisCacheProvider implements CacheProvider` e alterar a resolução do token `CACHE_PROVIDER` no `CepModule`. Nenhuma regra de negócio precisa ser alterada.
+
 ---
 
-## 7. Verificação e Testes Automatizados
+## 6. Configuração via Ambiente
 
-A suíte de testes cobre integralmente todos os cenários da camada de cache:
+Valores validados no bootstrap via Zod (`src/shared/config/env.validation.ts`):
 
-1. **Testes Unitários:**
-   - `test/unit/shared/lru-cache.provider.spec.ts`: Valida leitura, escrita, sobrescrita, expiração temporal via fake timers, limpeza geral e **evicção LRU quando a capacidade máxima é ultrapassada**.
-   - `test/unit/presentation/cep-cache.interceptor.spec.ts`: Valida Cache Hit (200 e 404), Cache Miss (gravação em sucesso e em 404), propagação de erros de rede sem cache e normalização de chaves.
-2. **Testes de Integração:**
-   - `test/integration/cep.module.spec.ts`: Garante que o NestJS resolve o token `CACHE_PROVIDER` para uma instância válida de `LruCacheProvider`.
-3. **Testes End-to-End (E2E):**
-   - `test/e2e/cep.e2e-spec.ts`: Executa requisições HTTP reais contra a aplicação inicializada:
-     - 1ª chamada com CEP real ➔ `200 OK` com `X-Cache: MISS`.
-     - 2ª chamada imediata com CEP real ➔ `200 OK` com `X-Cache: HIT` em menos de 5ms.
-     - 1ª chamada com CEP inexistente ➔ `404 Not Found` com `X-Cache: MISS`.
-     - 2ª chamada imediata com CEP inexistente ➔ `404 Not Found` com `X-Cache: HIT`.
+| Variável | Tipo | Padrão | Descrição |
+| :--- | :---: | :---: | :--- |
+| `CACHE_TTL_MS` | Number (> 0) | `86400000` (24h) | TTL para respostas de sucesso (`200 OK`). |
+| `CACHE_NEGATIVE_TTL_MS` | Number (> 0) | `600000` (10 min) | TTL para respostas de CEP inexistente (`404 Not Found`). |
 
-### Comandos de Execução:
+---
 
-```bash
-# Executar todos os testes
-npm test
+## 7. Testes Automatizados
 
-# Executar relatório de cobertura (cobertura > 95%)
-npm run test:coverage
-```
+- **Unitários:**
+  - `test/unit/shared/lru-cache.provider.spec.ts`: Leitura, escrita, TTL com fake timers e evicção quando atinge capacidade máxima.
+  - `test/unit/presentation/cep-cache.interceptor.spec.ts`: Cache Hit/Miss para 200 e 404, normalização de chave e não-cacheamento de erros 5xx.
+- **Integração (`test/integration/cep.module.spec.ts`):** Resolução correta do token `CACHE_PROVIDER`.
+- **E2E (`test/e2e/cep.e2e-spec.ts`):** Validação dos cabeçalhos `X-Cache: MISS` (1ª chamada) e `X-Cache: HIT` (2ª chamada) em requisições HTTP reais.
