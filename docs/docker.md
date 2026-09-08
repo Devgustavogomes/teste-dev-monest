@@ -75,7 +75,7 @@ Container rodando não significa container saudável: a aplicação pode ter tra
 │  - Copia node_modules/ de 'prod-deps' e dist/ de 'builder'                  │
 │  - Define 'USER node' (não-root)                                            │
 │  - Configura HEALTHCHECK ativo via wget                                     │
-│  - Executa 'CMD ["node", "dist/main.js"]'                                   │
+│  - Executa 'CMD ["npm", "run", "start:prod"]'                               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
