@@ -11,8 +11,6 @@ export const envSchema = z.object({
     .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
     .default('info'),
 
-  NODE_ENV: z.string().default('development'),
-
   CEP_PROVIDER_TIMEOUT_MS: z
     .string()
     .default('5000')
@@ -59,6 +57,18 @@ export const envSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
   OTEL_SERVICE_NAME: z.string().default('api-cep'),
+
+  THROTTLE_TTL_MS: z
+    .string()
+    .default('60000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
+
+  THROTTLE_LIMIT: z
+    .string()
+    .default('60')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
 });
 
 export type Env = z.infer<typeof envSchema>;
