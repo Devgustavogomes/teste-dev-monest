@@ -14,6 +14,7 @@ A aplicação é estruturada com base nos princípios de **Clean Architecture** 
                                  ▼
        ┌──────────────────────────────────────────────────┐
        │             CAMADA DE APRESENTAÇÃO               │
+       │  • ThrottlerGuard (Rate Limiting por IP)         │
        │  • CepController (Swagger / OpenAPI)             │
        │  • ZodValidationPipe (Validação estrita de CEP)  │
        │  • CepCacheInterceptor (Cache LRU + Negative)    │
@@ -144,6 +145,17 @@ O sistema separa estritamente **erros públicos voltados ao cliente** de **erros
 | `CepNotFoundException` | `AppError` | `404 Not Found` | CEP não encontrado em nenhum provedor. Sujeito a Negative Caching. |
 | `AllProvidersFailedException` | `AppError` | `502 Bad Gateway` | Todos os provedores falharam por timeout, indisponibilidade ou rede. |
 | `ProviderContractException` | `Error` (Interno) | N/A (Fallback) | Validação defensiva Zod falhou no provedor. Loga `ERROR`, aciona métrica de alerta e faz fallback para o próximo provider. |
+| `ThrottlerException` | `HttpException` | `429 Too Many Requests` | Limite de taxa de requisições excedido. Retorna cabeçalho `Retry-After`. |
+
+---
+
+### 3.5. Proteção por Rate Limiting (`@nestjs/throttler`)
+
+A aplicação protege seus endpoints contra sobrecarga, raspagem em massa e ataques de negação de serviço através de limitação de taxa por IP:
+- **Guard Global:** Registrado via `APP_GUARD` com `ThrottlerGuard`.
+- **Configuração Flexível:** TTL (`THROTTLE_TTL_MS`, padrão 60.000 ms) e limite de requisições (`THROTTLE_LIMIT`, padrão 60 requisições) parametrizados via variáveis de ambiente.
+- **Isenção de Healthcheck:** O endpoint `/health` é explicitamente marcado com `@SkipThrottle()` para permitir monitoramento contínuo e probes de orquestração sem falsos positivos.
+- **Suporte a Proxies Reversos:** `trust proxy` configurado no Express para correta resolução de IPs de clientes em containers e atrás de load balancers.
 
 ---
 
