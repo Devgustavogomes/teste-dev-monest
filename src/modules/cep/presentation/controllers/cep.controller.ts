@@ -42,6 +42,10 @@ export class CepController {
     description: 'CEP not found in any provider.',
   })
   @ApiResponse({
+    status: 429,
+    description: 'Rate limit exceeded — too many requests.',
+  })
+  @ApiResponse({
     status: 502,
     description: 'All CEP providers failed (timeout, network error, etc.).',
   })
