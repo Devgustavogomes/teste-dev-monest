@@ -7,6 +7,24 @@ import {
 } from '../../modules/cep/domain/interfaces/cep-provider.interface';
 import { TelemetryMetricsService } from '../observability/telemetry-metrics.service';
 
+function wasAbortedByCaller(error: unknown, ...args: unknown[]): boolean {
+  const signal = args.find(
+    (arg): arg is AbortSignal => arg instanceof AbortSignal,
+  );
+
+  if (!signal?.aborted) return false;
+  if (error === signal.reason) return true;
+  if (!(error instanceof Error)) return false;
+
+  const code = 'code' in error ? error.code : undefined;
+
+  return (
+    error.name === 'AbortError' ||
+    error.name === 'CanceledError' ||
+    code === 'ERR_CANCELED'
+  );
+}
+
 export interface CircuitBreakerOptions {
   errorThresholdPercentage: number;
   resetTimeout: number;
@@ -28,7 +46,7 @@ export class CircuitBreakerCepProvider implements CepProvider {
     logger: PinoLogger,
     private readonly telemetryMetrics?: TelemetryMetricsService,
   ) {
-    this.name = `CircuitBreaker(${provider.name})`;
+    this.name = provider.name;
 
     const { timeout, errorThresholdPercentage, resetTimeout, volumeThreshold } =
       options;
@@ -40,6 +58,7 @@ export class CircuitBreakerCepProvider implements CepProvider {
         errorThresholdPercentage,
         resetTimeout,
         volumeThreshold,
+        errorFilter: wasAbortedByCaller,
       },
     );
 
