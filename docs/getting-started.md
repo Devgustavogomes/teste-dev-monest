@@ -25,6 +25,10 @@ npm install
 cp .env.example .env
 ```
 
+Os limites de tempo são configuráveis no `.env`: `CEP_GLOBAL_TIMEOUT_MS`
+controla o deadline total da consulta (padrão `5000`), enquanto
+`CEP_PROVIDER_TIMEOUT_MS` limita cada provider individualmente (padrão `2000`).
+
 ---
 
 ## 3. Executando a Aplicação

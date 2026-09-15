@@ -84,7 +84,7 @@ teste-dev-monest/
 
 ### 3.1. Abstração & Extensibilidade (Open/Closed Principle)
 
-- **Contrato Único (`CepProvider`):** O caso de uso (`FindCepUseCase`) depende exclusivamente da interface abstrata `CepProvider`, sem conhecer detalhes de Axios ou URLs externas.
+- **Contrato Único (`CepProvider`):** O caso de uso (`FindCepUseCase`) depende exclusivamente da interface abstrata `CepProvider`, sem conhecer detalhes de Axios ou URLs externas. O resultado é discriminado entre `{ status: 'found', data }` e `{ status: 'not_found' }`, sem usar `null` para representar uma decisão de negócio.
 - **Como adicionar um 3º provedor (ex: `OpenCep`):**
   1. Crie a classe implementando `CepProvider` (ou estendendo `BaseHttpCepProvider`);
   2. Adicione a nova classe no array do token `CEP_PROVIDERS` em `src/modules/cep/cep.module.ts`.
@@ -117,8 +117,10 @@ O sistema aplica defesa em profundidade para lidar com instabilidades externas:
    - Implementado via padrão **Decorator** com a biblioteca `opossum`.
    - Se um provedor acumular 50% de falhas, seu circuito **abre**, rejeitando requisições com *fail-fast* imediato sem gerar conexões de rede ou esperar timeouts.
 
-5. **Timeouts Curtos:**
-   - Limite rígido por provedor (padrão: 5000ms via `CEP_PROVIDER_TIMEOUT_MS`). A aplicação nunca aguarda 30 segundos.
+5. **Deadline Global e Timeouts Curtos:**
+   - Cada consulta recebe um `AbortSignal` compartilhado entre todos os fallbacks, com deadline total de 5000ms por padrão (`CEP_GLOBAL_TIMEOUT_MS`).
+   - Cada tentativa também possui limite próprio de 2000ms por padrão (`CEP_PROVIDER_TIMEOUT_MS`). O sinal é propagado até o Axios para cancelar a conexão quando o orçamento global termina.
+   - O próximo provedor não é iniciado se o deadline global já tiver expirado.
 
 ---
 
@@ -142,7 +144,7 @@ O sistema separa estritamente **erros públicos voltados ao cliente** de **erros
 | Erro / Exceção | Tipo | HTTP Status | Comportamento |
 | :--- | :--- | :---: | :--- |
 | `InvalidCepException` | `AppError` | `400 Bad Request` | CEP fora do formato (8 dígitos numéricos). |
-| `CepNotFoundException` | `AppError` | `404 Not Found` | CEP não encontrado em nenhum provedor. Sujeito a Negative Caching. |
+| `CepNotFoundException` | `AppError` | `404 Not Found` | Todos os provedores confirmaram que o CEP não existe. Sujeito a Negative Caching. |
 | `AllProvidersFailedException` | `AppError` | `502 Bad Gateway` | Todos os provedores falharam por timeout, indisponibilidade ou rede. |
 | `ProviderContractException` | `Error` (Interno) | N/A (Fallback) | Validação defensiva Zod falhou no provedor. Loga `ERROR`, aciona métrica de alerta e faz fallback para o próximo provider. |
 | `ThrottlerException` | `HttpException` | `429 Too Many Requests` | Limite de taxa de requisições excedido. Retorna cabeçalho `Retry-After`. |

@@ -7,7 +7,7 @@ import { BrasilApiProvider } from './infrastructure/providers/brasilapi.provider
 import { Env } from '../../shared/config/env.validation';
 import { FindCepUseCase } from './application/use-cases/find-cep.use-case';
 import { CepController } from './presentation/controllers/cep.controller';
-import { CEP_PROVIDERS } from './cep.constants';
+import { CEP_GLOBAL_TIMEOUT, CEP_PROVIDERS } from './cep.constants';
 import { RoundRobinStrategy } from '../../shared/strategies/round-robin.strategy';
 import { CepProvider } from './domain/interfaces/cep-provider.interface';
 import { CACHE_PROVIDER } from '../../shared/cache/cache.constants';
@@ -75,6 +75,12 @@ import { TelemetryMetricsService } from '../../shared/observability/telemetry-me
       useFactory: (providers: CepProvider[]) =>
         new RoundRobinStrategy(providers),
       inject: [CEP_PROVIDERS],
+    },
+    {
+      provide: CEP_GLOBAL_TIMEOUT,
+      useFactory: (configService: ConfigService<Env, true>): number =>
+        configService.get('CEP_GLOBAL_TIMEOUT_MS', { infer: true }),
+      inject: [ConfigService],
     },
     FindCepUseCase,
     {

@@ -58,15 +58,18 @@ O `CircuitBreakerCepProvider` empacota qualquer implementação de `CepProvider`
 // src/shared/circuit-breaker/circuit-breaker-cep-provider.ts
 export class CircuitBreakerCepProvider implements CepProvider {
   readonly name: string;
-  private readonly breaker: CircuitBreaker<[string], CepResponse | null>;
+  private readonly breaker: CircuitBreaker<[string, AbortSignal?], CepProviderResult>;
 
   constructor(provider: CepProvider, options: CircuitBreakerOptions) {
     this.name = `CircuitBreaker(${provider.name})`;
-    this.breaker = new CircuitBreaker((cep: string) => provider.find(cep), options);
+    this.breaker = new CircuitBreaker(
+      (cep: string, signal?: AbortSignal) => provider.find(cep, signal),
+      options,
+    );
   }
 
-  find(cep: string): Promise<CepResponse | null> {
-    return this.breaker.fire(cep);
+  find(cep: string, signal?: AbortSignal): Promise<CepProviderResult> {
+    return this.breaker.fire(cep, signal);
   }
 }
 ```
@@ -87,7 +90,7 @@ return providers.map((p) => new CircuitBreakerCepProvider(p, options));
 
 | Cenário | Comportamento do Provedor | Contabiliza Falha no Circuit Breaker? | Ação no Caso de Uso |
 | :--- | :--- | :---: | :--- |
-| **CEP Inexistente (404)** | Retorna `null` | ❌ **Não** (Sucesso de negócio) | Registra ausência; tenta próximo provedor se houver. |
+| **CEP Inexistente (404)** | Retorna `{ status: 'not_found' }` | ❌ **Não** (Sucesso de negócio) | Registra a confirmação; responde 404 apenas se todos confirmarem. |
 | **Timeout de Rede** | Lança erro de timeout | ✅ **Sim** | Faz fallback imediato para o próximo provedor. |
 | **Erro HTTP 5xx / Rede** | Lança exceção de conexão | ✅ **Sim** | Faz fallback imediato para o próximo provedor. |
 | **Violação de Contrato** | Lança `ProviderContractException` | ✅ **Sim** | Loga erro, registra métrica e faz fallback. |
@@ -104,7 +107,8 @@ Valores validados no bootstrap via Zod (`src/shared/config/env.validation.ts`):
 | `CB_ERROR_THRESHOLD_PERCENTAGE` | Number (1-100) | `50` | % de falhas na janela para abrir o circuito. |
 | `CB_RESET_TIMEOUT_MS` | Number | `30000` | Tempo (ms) em estado aberto antes de testar em *Half-Open*. |
 | `CB_VOLUME_THRESHOLD` | Number | `5` | Volume mínimo de requisições na janela para calcular erros. |
-| `CEP_PROVIDER_TIMEOUT_MS` | Number | `5000` | Timeout máximo (ms) permitido por requisição individual. |
+| `CEP_GLOBAL_TIMEOUT_MS` | Number | `5000` | Deadline total (ms) da consulta, incluindo todos os fallbacks. Ao expirar, o sinal compartilhado cancela a operação em andamento. |
+| `CEP_PROVIDER_TIMEOUT_MS` | Number | `2000` | Timeout máximo (ms) de cada requisição individual. O limite efetivo sempre será o menor entre este valor e o tempo restante do deadline global. |
 
 ---
 

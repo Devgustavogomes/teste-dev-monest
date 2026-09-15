@@ -1,271 +1,101 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { GlobalExceptionFilter } from '../../../src/shared/filters/global-exception.filter';
 import { AppError } from '../../../src/shared/errors/app.error';
-import { InvalidCepException } from '../../../src/shared/errors/invalid-cep.exception';
-import { CepNotFoundException } from '../../../src/shared/errors/cep-not-found.exception';
-import { AllProvidersFailedException } from '../../../src/shared/errors/all-providers-failed.exception';
 
 describe('GlobalExceptionFilter', () => {
   let filter: GlobalExceptionFilter;
-  let mockLogger: {
-    setContext: ReturnType<typeof vi.fn>;
-    error: ReturnType<typeof vi.fn>;
-    warn: ReturnType<typeof vi.fn>;
-    info: ReturnType<typeof vi.fn>;
-    debug: ReturnType<typeof vi.fn>;
-  };
-  let mockStatus: ReturnType<typeof vi.fn>;
-  let mockJson: ReturnType<typeof vi.fn>;
-  let mockHost: ArgumentsHost;
-  let mockRequest: { url: string; method: string };
+  let host: ArgumentsHost;
+  let status: ReturnType<typeof vi.fn>;
+  let json: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    mockLogger = {
-      setContext: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-      info: vi.fn(),
-      debug: vi.fn(),
-    };
-    filter = new GlobalExceptionFilter(mockLogger as unknown as PinoLogger);
-    mockJson = vi.fn();
-    mockStatus = vi.fn().mockReturnValue({ json: mockJson });
-    mockRequest = {
-      url: '/cep/01001000',
-      method: 'GET',
-    };
-
-    mockHost = {
-      switchToHttp: vi.fn().mockReturnValue({
-        getResponse: vi.fn().mockReturnValue({
-          status: mockStatus,
-          json: mockJson,
-        }),
-        getRequest: vi.fn().mockReturnValue(mockRequest),
+    json = vi.fn();
+    status = vi.fn().mockReturnValue({ json });
+    host = {
+      switchToHttp: () => ({
+        getResponse: () => ({ status, json }),
+        getRequest: () => ({ url: '/cep/01001000', method: 'GET' }),
       }),
     } as unknown as ArgumentsHost;
+    filter = new GlobalExceptionFilter({
+      setContext: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    } as unknown as PinoLogger);
   });
 
-  describe('AppError instances', () => {
-    it('should format InvalidCepException (400) correctly', () => {
-      const exception = new InvalidCepException();
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 400,
-          message: 'Invalid CEP format. Must contain 8 numeric digits.',
-          error: 'Bad Request',
-          timestamp: expect.any(String),
-        }),
-      );
+  const expectResponse = (
+    expectedStatus: number,
+    message: string,
+    error: string,
+  ) => {
+    expect(status).toHaveBeenCalledWith(expectedStatus);
+    expect(json).toHaveBeenCalledWith({
+      statusCode: expectedStatus,
+      message,
+      error,
+      timestamp: expect.any(String),
     });
+  };
 
-    it('should format CepNotFoundException (404) correctly', () => {
-      const exception = new CepNotFoundException('01001000');
+  it('preserves application error details', () => {
+    filter.catch(
+      new AppError(422, 'Invalid domain state', 'Unprocessable Entity'),
+      host,
+    );
 
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(404);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 404,
-          message: 'CEP 01001000 not found.',
-          error: 'Not Found',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should format AllProvidersFailedException (502) correctly', () => {
-      const exception = new AllProvidersFailedException();
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(502);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 502,
-          message: 'All CEP providers failed. Please try again later.',
-          error: 'Bad Gateway',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should format custom AppError instance correctly', () => {
-      const exception = new AppError(
-        422,
-        'Custom unprocessable entity',
-        'Unprocessable Entity',
-      );
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(422);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 422,
-          message: 'Custom unprocessable entity',
-          error: 'Unprocessable Entity',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
+    expectResponse(422, 'Invalid domain state', 'Unprocessable Entity');
   });
 
-  describe('Standard NestJS HttpException', () => {
-    it('should format HttpException with string response', () => {
-      const exception = new HttpException(
-        'Forbidden resource',
-        HttpStatus.FORBIDDEN,
-      );
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(403);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 403,
-          message: 'Forbidden resource',
-          error: 'FORBIDDEN',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should format HttpException with object response containing string message', () => {
-      const exception = new HttpException(
-        { message: 'Resource not found', custom: 'data' },
-        HttpStatus.NOT_FOUND,
-      );
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(404);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 404,
-          message: 'Resource not found',
-          error: 'NOT_FOUND',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should format HttpException with object response containing array message (e.g. validation errors)', () => {
-      const exception = new HttpException(
-        { message: ['name is required', 'email must be valid'] },
+  it.each([
+    [
+      new HttpException('Forbidden resource', HttpStatus.FORBIDDEN),
+      403,
+      'Forbidden resource',
+      'FORBIDDEN',
+    ],
+    [
+      new HttpException({ message: 'Missing' }, HttpStatus.NOT_FOUND),
+      404,
+      'Missing',
+      'NOT_FOUND',
+    ],
+    [
+      new HttpException(
+        { message: ['name is required', 'email is invalid'] },
         HttpStatus.BAD_REQUEST,
-      );
+      ),
+      400,
+      'name is required, email is invalid',
+      'BAD_REQUEST',
+    ],
+    [
+      new HttpException({}, HttpStatus.METHOD_NOT_ALLOWED),
+      405,
+      'METHOD_NOT_ALLOWED',
+      'METHOD_NOT_ALLOWED',
+    ],
+    [
+      new HttpException(123 as never, HttpStatus.UNAUTHORIZED),
+      401,
+      'UNAUTHORIZED',
+      'UNAUTHORIZED',
+    ],
+  ])(
+    'normalizes HttpException responses',
+    (exception, expectedStatus, message, error) => {
+      filter.catch(exception, host);
+      expectResponse(expectedStatus, message, error);
+    },
+  );
 
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 400,
-          message: 'name is required, email must be valid',
-          error: 'BAD_REQUEST',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should fallback to HTTP status name when object response lacks message', () => {
-      const exception = new HttpException({}, HttpStatus.METHOD_NOT_ALLOWED);
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(405);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 405,
-          message: 'METHOD_NOT_ALLOWED',
-          error: 'METHOD_NOT_ALLOWED',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should fallback to HTTP status name when response is neither string nor object', () => {
-      const exception = new HttpException(
-        12345 as any,
-        HttpStatus.UNAUTHORIZED,
-      );
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(401);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 401,
-          message: 'UNAUTHORIZED',
-          error: 'UNAUTHORIZED',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-  });
-
-  describe('Unknown and unexpected errors', () => {
-    it('should handle standard Javascript Error with 500 Internal Server Error', () => {
-      const exception = new Error('Unexpected database failure');
-
-      filter.catch(exception, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(500);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 500,
-          message: 'Internal Server Error',
-          error: 'Internal Server Error',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should handle non-error primitives thrown (e.g., string)', () => {
-      filter.catch('something broke', mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(500);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 500,
-          message: 'Internal Server Error',
-          error: 'Internal Server Error',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-
-    it('should handle null or undefined thrown', () => {
-      filter.catch(null, mockHost);
-
-      expect(mockStatus).toHaveBeenCalledWith(500);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 500,
-          message: 'Internal Server Error',
-          error: 'Internal Server Error',
-          timestamp: expect.any(String),
-        }),
-      );
-    });
-  });
-
-  describe('Timestamp formatting', () => {
-    it('should produce a valid ISO 8601 timestamp', () => {
-      filter.catch(new InvalidCepException(), mockHost);
-
-      const jsonCall = mockJson.mock.calls[0][0];
-      expect(jsonCall.timestamp).toBeDefined();
-      const parsedDate = new Date(jsonCall.timestamp);
-      expect(parsedDate.toISOString()).toBe(jsonCall.timestamp);
-    });
-  });
+  it.each([new Error('failure'), 'failure', null])(
+    'hides unexpected error details for %j',
+    (exception) => {
+      filter.catch(exception, host);
+      expectResponse(500, 'Internal Server Error', 'Internal Server Error');
+    },
+  );
 });

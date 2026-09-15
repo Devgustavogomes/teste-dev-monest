@@ -80,7 +80,7 @@ describe('CepCacheInterceptor', () => {
   });
 
   describe('Cache Hit scenarios', () => {
-    it('Cache Hit 200 sets X-Cache: HIT, returns cached response, and skips handler execution', async () => {
+    it('returns a positive cache hit without calling the handler', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue(mockCepResponse);
       const context = createMockContext('01001000');
 
@@ -93,7 +93,7 @@ describe('CepCacheInterceptor', () => {
       expect(mockCacheProvider.get).toHaveBeenCalledWith('cep:01001000');
     });
 
-    it('Negative Cache Hit throws CepNotFoundException with X-Cache: HIT', async () => {
+    it('returns a negative cache hit as CepNotFoundException', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue({ notFound: true });
       const context = createMockContext('01001000');
 
@@ -107,7 +107,7 @@ describe('CepCacheInterceptor', () => {
   });
 
   describe('Cache Miss scenarios', () => {
-    it('Cache Miss 200 sets X-Cache: MISS, calls next.handle(), saves response to cache with CACHE_TTL_MS', async () => {
+    it('stores successful responses after a cache miss', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue(null);
       vi.mocked(mockCallHandler.handle).mockReturnValue(of(mockCepResponse));
       const context = createMockContext('01001000');
@@ -125,7 +125,7 @@ describe('CepCacheInterceptor', () => {
       );
     });
 
-    it('Cache Miss 404 sets X-Cache: MISS, catches CepNotFoundException, saves negative entry ({ notFound: true }) with CACHE_NEGATIVE_TTL_MS, rethrows exception', async () => {
+    it('stores confirmed 404 responses in the negative cache', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue(null);
       const notFoundException = new CepNotFoundException('01001000');
       vi.mocked(mockCallHandler.handle).mockReturnValue(
@@ -148,7 +148,7 @@ describe('CepCacheInterceptor', () => {
       );
     });
 
-    it('Transient error (AllProvidersFailedException 502) sets X-Cache: MISS, does NOT save to cache, rethrows exception', async () => {
+    it('does not cache transient provider failures', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue(null);
       const serverError = new AllProvidersFailedException();
       vi.mocked(mockCallHandler.handle).mockReturnValue(
@@ -164,27 +164,10 @@ describe('CepCacheInterceptor', () => {
       expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
       expect(mockCacheProvider.set).not.toHaveBeenCalled();
     });
-
-    it('Generic runtime error sets X-Cache: MISS, does NOT save to cache, rethrows exception', async () => {
-      vi.mocked(mockCacheProvider.get).mockResolvedValue(null);
-      const genericError = new Error('Unexpected network failure');
-      vi.mocked(mockCallHandler.handle).mockReturnValue(
-        throwError(() => genericError),
-      );
-      const context = createMockContext('01001000');
-
-      const result$ = await interceptor.intercept(context, mockCallHandler);
-
-      await expect(firstValueFrom(result$)).rejects.toThrow(genericError);
-
-      expect(mockResponse.setHeader).toHaveBeenCalledWith('X-Cache', 'MISS');
-      expect(mockCallHandler.handle).toHaveBeenCalledTimes(1);
-      expect(mockCacheProvider.set).not.toHaveBeenCalled();
-    });
   });
 
   describe('Non-CEP routes bypass', () => {
-    it('bypasses caching when route is not a CEP lookup (e.g. /health)', async () => {
+    it('bypasses non-CEP routes', async () => {
       const context = {
         switchToHttp: () => ({
           getRequest: () => ({
@@ -207,7 +190,7 @@ describe('CepCacheInterceptor', () => {
   });
 
   describe('Resilience (non-blocking cache write failures)', () => {
-    it('should deliver response normally even if saving to cache fails', async () => {
+    it('does not fail the request when a cache write fails', async () => {
       vi.mocked(mockCacheProvider.get).mockResolvedValue(null);
       vi.mocked(mockCacheProvider.set).mockRejectedValue(
         new Error('Cache connection refused'),

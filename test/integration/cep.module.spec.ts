@@ -1,67 +1,65 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Test, TestingModule } from '@nestjs/testing';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpService } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
-import { of, throwError } from 'rxjs';
-import { AxiosError, AxiosResponse } from 'axios';
+import { Test, TestingModule } from '@nestjs/testing';
 import { LoggerModule } from 'nestjs-pino';
+import { AxiosError, AxiosResponse } from 'axios';
+import { of, throwError } from 'rxjs';
 import { CepModule } from '../../src/modules/cep/cep.module';
 import { CEP_PROVIDERS } from '../../src/modules/cep/cep.constants';
 import { FindCepUseCase } from '../../src/modules/cep/application/use-cases/find-cep.use-case';
 import { CepProvider } from '../../src/modules/cep/domain/interfaces/cep-provider.interface';
 import { validate } from '../../src/shared/config/env.validation';
-import { CepNotFoundException } from '../../src/shared/errors/cep-not-found.exception';
 import { AllProvidersFailedException } from '../../src/shared/errors/all-providers-failed.exception';
 import { CircuitBreakerCepProvider } from '../../src/shared/circuit-breaker/circuit-breaker-cep-provider';
 import { ObservabilityModule } from '../../src/shared/observability/observability.module';
 
-describe('CepModule (Integration)', () => {
+const response = (data: unknown): AxiosResponse =>
+  ({
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {},
+  }) as AxiosResponse;
+
+const viaCepResponse = response({
+  cep: '01001-000',
+  logradouro: 'Praca da Se',
+  complemento: '',
+  bairro: 'Se',
+  localidade: 'Sao Paulo',
+  uf: 'SP',
+  ibge: '3550308',
+});
+
+const brasilApiResponse = response({
+  cep: '01001-000',
+  state: 'SP',
+  city: 'Sao Paulo',
+  neighborhood: 'Se',
+  street: 'Praca da Se',
+  service: 'viacep',
+});
+
+describe('CepModule integration', () => {
   let moduleRef: TestingModule;
   let useCase: FindCepUseCase;
-  let providersList: CepProvider[];
-  let mockHttpService: { get: ReturnType<typeof vi.fn> };
-
-  const mockViaCepSuccessResponse = {
-    data: {
-      cep: '01001-000',
-      logradouro: 'Praça da Sé',
-      complemento: 'lado ímpar',
-      bairro: 'Sé',
-      localidade: 'São Paulo',
-      uf: 'SP',
-      ibge: '3550308',
-    },
-    status: 200,
-    statusText: 'OK',
-    headers: {},
-    config: {} as any,
-  } as AxiosResponse;
-
-  const mockBrasilApiSuccessResponse = {
-    data: {
-      cep: '01001-000',
-      state: 'SP',
-      city: 'São Paulo',
-      neighborhood: 'Sé',
-      street: 'Praça da Sé',
-      service: 'viacep',
-    },
-    status: 200,
-    statusText: 'OK',
-    headers: {},
-    config: {} as any,
-  } as AxiosResponse;
+  let providers: CepProvider[];
+  let httpService: { get: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
-    mockHttpService = {
-      get: vi.fn(),
-    };
+    process.env.CB_VOLUME_THRESHOLD = '2';
+    process.env.CB_ERROR_THRESHOLD_PERCENTAGE = '50';
+    process.env.CB_RESET_TIMEOUT_MS = '30000';
+    httpService = { get: vi.fn() };
 
     moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
           validate,
+          ignoreEnvFile: true,
         }),
         LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
         ObservabilityModule,
@@ -69,236 +67,76 @@ describe('CepModule (Integration)', () => {
       ],
     })
       .overrideProvider(HttpService)
-      .useValue(mockHttpService)
+      .useValue(httpService)
       .compile();
 
     useCase = moduleRef.get<FindCepUseCase>(FindCepUseCase);
-    providersList = moduleRef.get<CepProvider[]>(CEP_PROVIDERS);
+    providers = moduleRef.get<CepProvider[]>(CEP_PROVIDERS);
   });
 
   afterEach(async () => {
-    if (providersList) {
-      for (const provider of providersList) {
-        if (provider instanceof CircuitBreakerCepProvider) {
-          provider.circuit.shutdown();
-        }
+    for (const provider of providers) {
+      if (provider instanceof CircuitBreakerCepProvider) {
+        provider.circuit.shutdown();
       }
     }
-    await moduleRef?.close();
+    await moduleRef.close();
+    delete process.env.CB_VOLUME_THRESHOLD;
+    delete process.env.CB_ERROR_THRESHOLD_PERCENTAGE;
+    delete process.env.CB_RESET_TIMEOUT_MS;
   });
 
-  describe('End-to-End Module Flow (UseCase -> Providers -> HttpService)', () => {
-    it('should lookup CEP via ViaCEP on the first call and map response', async () => {
-      mockHttpService.get.mockReturnValue(of(mockViaCepSuccessResponse));
-
-      const result = await useCase.execute('01001000');
-
-      expect(mockHttpService.get).toHaveBeenCalledTimes(1);
-      expect(mockHttpService.get).toHaveBeenCalledWith(
-        'https://viacep.com.br/ws/01001000/json/',
-        { timeout: 5000 },
-      );
-      expect(result).toEqual({
-        cep: '01001000',
-        street: 'Praça da Sé',
-        complement: 'lado ímpar',
-        neighborhood: 'Sé',
-        city: 'São Paulo',
-        state: 'SP',
-        ibge: '3550308',
-      });
+  it('wires both providers behind round-robin and the shared contract', async () => {
+    httpService.get.mockReturnValueOnce(of(viaCepResponse));
+    await expect(useCase.execute('01001000')).resolves.toMatchObject({
+      cep: '01001000',
+      ibge: '3550308',
     });
 
-    it('should alternate to BrasilAPI on the second call (Round Robin)', async () => {
-      mockHttpService.get.mockReturnValueOnce(of(mockViaCepSuccessResponse));
-      await useCase.execute('01001000');
-      expect(mockHttpService.get).toHaveBeenLastCalledWith(
-        'https://viacep.com.br/ws/01001000/json/',
-        { timeout: 5000 },
-      );
-
-      mockHttpService.get.mockReturnValueOnce(of(mockBrasilApiSuccessResponse));
-      const result2 = await useCase.execute('01001000');
-      expect(mockHttpService.get).toHaveBeenLastCalledWith(
-        'https://brasilapi.com.br/api/cep/v1/01001000',
-        { timeout: 5000 },
-      );
-      expect(result2).toEqual({
-        cep: '01001000',
-        street: 'Praça da Sé',
-        complement: '',
-        neighborhood: 'Sé',
-        city: 'São Paulo',
-        state: 'SP',
-        ibge: '',
-      });
+    httpService.get.mockReturnValueOnce(of(brasilApiResponse));
+    await expect(useCase.execute('01001000')).resolves.toMatchObject({
+      cep: '01001000',
+      ibge: '',
     });
 
-    it('should fallback to BrasilAPI when ViaCEP throws a network error', async () => {
-      const networkError = new AxiosError('Network Error', 'ENOTFOUND');
-
-      mockHttpService.get
-        .mockReturnValueOnce(throwError(() => networkError))
-        .mockReturnValueOnce(of(mockBrasilApiSuccessResponse));
-
-      const result = await useCase.execute('01001000');
-
-      expect(mockHttpService.get).toHaveBeenCalledTimes(2);
-      expect(result).toEqual({
-        cep: '01001000',
-        street: 'Praça da Sé',
-        complement: '',
-        neighborhood: 'Sé',
-        city: 'São Paulo',
-        state: 'SP',
-        ibge: '',
-      });
-    });
-
-    it('should fallback to BrasilAPI when ViaCEP returns { erro: true } (not found)', async () => {
-      const viaCepNotFound = {
-        data: { erro: true },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config: {} as any,
-      } as AxiosResponse;
-
-      mockHttpService.get
-        .mockReturnValueOnce(of(viaCepNotFound))
-        .mockReturnValueOnce(of(mockBrasilApiSuccessResponse));
-
-      const result = await useCase.execute('01001000');
-
-      expect(mockHttpService.get).toHaveBeenCalledTimes(2);
-      expect(result).toEqual({
-        cep: '01001000',
-        street: 'Praça da Sé',
-        complement: '',
-        neighborhood: 'Sé',
-        city: 'São Paulo',
-        state: 'SP',
-        ibge: '',
-      });
-    });
-
-    it('should throw CepNotFoundException when both providers indicate not found', async () => {
-      const viaCepNotFound = {
-        data: { erro: true },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config: {} as any,
-      } as AxiosResponse;
-
-      const brasilApi404 = new AxiosError(
-        'Request failed with status code 404',
-        'ERR_BAD_REQUEST',
-        undefined,
-        undefined,
-        { status: 404 } as any,
-      );
-
-      mockHttpService.get
-        .mockReturnValueOnce(of(viaCepNotFound))
-        .mockReturnValueOnce(throwError(() => brasilApi404));
-
-      await expect(useCase.execute('99999999')).rejects.toThrow(
-        CepNotFoundException,
-      );
-      expect(mockHttpService.get).toHaveBeenCalledTimes(2);
-    });
-
-    it('should throw AllProvidersFailedException when all providers throw HTTP 500 or network errors', async () => {
-      const serverError = new AxiosError(
-        'Internal Server Error',
-        'ERR_BAD_RESPONSE',
-        undefined,
-        undefined,
-        { status: 500 } as any,
-      );
-
-      mockHttpService.get
-        .mockReturnValueOnce(throwError(() => serverError))
-        .mockReturnValueOnce(throwError(() => serverError));
-
-      await expect(useCase.execute('01001000')).rejects.toThrow(
-        AllProvidersFailedException,
-      );
-      expect(mockHttpService.get).toHaveBeenCalledTimes(2);
-    });
+    expect(httpService.get).toHaveBeenNthCalledWith(
+      1,
+      'https://viacep.com.br/ws/01001000/json/',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(httpService.get).toHaveBeenNthCalledWith(
+      2,
+      'https://brasilapi.com.br/api/cep/v1/01001000',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
-  describe('Circuit Breaker Fail-Fast Behavior', () => {
-    let cbModuleRef: TestingModule;
-    let cbUseCase: FindCepUseCase;
-    let cbProvidersList: CepProvider[];
-    let cbMockHttpService: { get: ReturnType<typeof vi.fn> };
+  it('falls back through circuit-breaker-decorated providers', async () => {
+    httpService.get
+      .mockReturnValueOnce(
+        throwError(() => new AxiosError('network error', 'ENOTFOUND')),
+      )
+      .mockReturnValueOnce(of(brasilApiResponse));
 
-    beforeEach(async () => {
-      process.env.CB_VOLUME_THRESHOLD = '2';
-      process.env.CB_ERROR_THRESHOLD_PERCENTAGE = '50';
-      process.env.CB_RESET_TIMEOUT_MS = '30000';
-
-      cbMockHttpService = { get: vi.fn() };
-
-      cbModuleRef = await Test.createTestingModule({
-        imports: [
-          ConfigModule.forRoot({
-            isGlobal: true,
-            validate,
-            ignoreEnvFile: true,
-          }),
-          LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
-          ObservabilityModule,
-          CepModule,
-        ],
-      })
-        .overrideProvider(HttpService)
-        .useValue(cbMockHttpService)
-        .compile();
-
-      cbUseCase = cbModuleRef.get<FindCepUseCase>(FindCepUseCase);
-      cbProvidersList = cbModuleRef.get<CepProvider[]>(CEP_PROVIDERS);
+    await expect(useCase.execute('01001000')).resolves.toMatchObject({
+      cep: '01001000',
+      city: 'Sao Paulo',
     });
+    expect(httpService.get).toHaveBeenCalledTimes(2);
+  });
 
-    afterEach(async () => {
-      if (cbProvidersList) {
-        for (const provider of cbProvidersList) {
-          if (provider instanceof CircuitBreakerCepProvider) {
-            provider.circuit.shutdown();
-          }
-        }
-      }
-      await cbModuleRef?.close();
+  it('stops calling HttpService after both circuits open', async () => {
+    const failure = new AxiosError('server error', 'ERR_BAD_RESPONSE');
+    httpService.get.mockReturnValue(throwError(() => failure));
 
-      delete process.env.CB_VOLUME_THRESHOLD;
-      delete process.env.CB_ERROR_THRESHOLD_PERCENTAGE;
-      delete process.env.CB_RESET_TIMEOUT_MS;
-    });
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await useCase.execute('01001000').catch(() => undefined);
+    }
+    httpService.get.mockClear();
 
-    it('should reject instantly (fail-fast) without calling HttpService once both circuits are open', async () => {
-      const technicalError = new AxiosError(
-        'Internal Server Error',
-        'ERR_BAD_RESPONSE',
-        undefined,
-        undefined,
-        { status: 500 } as any,
-      );
-
-      cbMockHttpService.get.mockReturnValue(throwError(() => technicalError));
-      const warmupAttempts = 4;
-      for (let i = 0; i < warmupAttempts; i++) {
-        await cbUseCase.execute('01001000').catch(() => {});
-      }
-
-      cbMockHttpService.get.mockClear();
-
-      await expect(cbUseCase.execute('01001000')).rejects.toThrow(
-        AllProvidersFailedException,
-      );
-
-      expect(cbMockHttpService.get).not.toHaveBeenCalled();
-    });
+    await expect(useCase.execute('01001000')).rejects.toBeInstanceOf(
+      AllProvidersFailedException,
+    );
+    expect(httpService.get).not.toHaveBeenCalled();
   });
 });

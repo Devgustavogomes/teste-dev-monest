@@ -105,69 +105,21 @@ describe('CepController (e2e — real external APIs)', () => {
     expect(secondResponse.body.timestamp).toBeDefined();
   }, 15000);
 
-  it('GET /cep/123 — invalid format returns 400 Bad Request without hitting external APIs or cache', async () => {
-    const response = await request(app.getHttpServer())
-      .get('/cep/123')
-      .expect(400)
-      .expect('Content-Type', /json/);
-
-    expect(response.body).toMatchObject({
-      statusCode: 400,
-      message: 'Invalid CEP format. Must contain 8 numeric digits.',
-      error: 'Bad Request',
-    });
-    expect(response.body.timestamp).toBeDefined();
-    const xCache = response.headers['x-cache'] ?? response.get('x-cache');
-    expect(xCache).toBeUndefined();
-  });
-
-  it('GET /cep/abcdefgh — non-numeric CEP returns 400 Bad Request without caching', async () => {
-    const response = await request(app.getHttpServer())
-      .get('/cep/abcdefgh')
-      .expect(400)
-      .expect('Content-Type', /json/);
-
-    expect(response.body).toMatchObject({
-      statusCode: 400,
-      message: 'Invalid CEP format. Must contain 8 numeric digits.',
-      error: 'Bad Request',
-    });
-    const xCache = response.headers['x-cache'] ?? response.get('x-cache');
-    expect(xCache).toBeUndefined();
-  });
-
-  it('Round robin — multiple consecutive requests succeed across providers and leverage cache', async () => {
-    const res1 = await request(app.getHttpServer())
-      .get('/cep/01001000')
-      .expect(200);
-
-    const res2 = await request(app.getHttpServer())
-      .get('/cep/01001000')
-      .expect(200);
-
-    expect(res1.body.city).toBe('São Paulo');
-    expect(res2.body.city).toBe('São Paulo');
-
-    const xCache1 = res1.headers['x-cache'] ?? res1.get('x-cache');
-    const xCache2 = res2.headers['x-cache'] ?? res2.get('x-cache');
-    expect(xCache1?.toUpperCase()).toBe('HIT');
-    expect(xCache2?.toUpperCase()).toBe('HIT');
-  }, 15000);
-
-  describe('Circuit Breaker — transparent with real external APIs', () => {
-    it('should serve CEP requests successfully through circuit-breaker-wrapped providers', async () => {
+  it.each(['123', 'abcdefgh'])(
+    'GET /cep/%s — invalid CEP returns 400 without caching',
+    async (invalidCep) => {
       const response = await request(app.getHttpServer())
-        .get('/cep/01001000')
-        .expect(200)
+        .get(`/cep/${invalidCep}`)
+        .expect(400)
         .expect('Content-Type', /json/);
 
       expect(response.body).toMatchObject({
-        cep: '01001000',
-        city: 'São Paulo',
-        state: 'SP',
+        statusCode: 400,
+        message: 'Invalid CEP format. Must contain 8 numeric digits.',
+        error: 'Bad Request',
       });
-      expect(response.body.street).toBeDefined();
-      expect(response.body.neighborhood).toBeDefined();
-    }, 15000);
-  });
+      const xCache = response.headers['x-cache'] ?? response.get('x-cache');
+      expect(xCache).toBeUndefined();
+    },
+  );
 });

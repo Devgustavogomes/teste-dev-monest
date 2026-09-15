@@ -50,7 +50,7 @@ Localizado em `src/modules/cep/presentation/interceptors/cep-cache.interceptor.t
 
 ## 3. Negative Caching (Cache de 404)
 
-Quando um CEP não existe, a aplicação consulta o primeiro provedor e, caso ele não encontre, aciona o **fallback** para consultar o próximo provedor da fila. Se nenhum dos provedores cadastrados encontrar o CEP, o caso de uso conclui que ele realmente não existe e lança `CepNotFoundException` (404).
+Quando um CEP não existe, a aplicação consulta o primeiro provedor e, caso ele responda `{ status: 'not_found' }`, aciona o **fallback** para consultar o próximo provedor da fila. O caso de uso somente lança `CepNotFoundException` (404) quando **todos** os provedores confirmam esse resultado. Uma combinação de `not_found` com timeout, deadline ou falha técnica retorna 502 e não alimenta o cache negativo.
 
 Para evitar que essa verificação passe por todos os provedores repetidamente:
 

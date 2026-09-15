@@ -2,15 +2,18 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 import { firstValueFrom } from 'rxjs';
-import { AxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import { z } from 'zod';
-import { CepProvider } from '../../domain/interfaces/cep-provider.interface';
-import { CepResponse } from '../../presentation/schemas/cep-response.schema';
+import {
+  CepProvider,
+  CepProviderResult,
+} from '../../domain/interfaces/cep-provider.interface';
 import { Env } from '../../../../shared/config/env.validation';
 import { ProviderContractException } from '../../../../shared/errors/provider-contract.exception';
 
 export interface FetchOptions {
   notFoundOn404?: boolean;
+  signal?: AbortSignal;
 }
 
 export abstract class BaseHttpCepProvider implements CepProvider {
@@ -38,6 +41,7 @@ export abstract class BaseHttpCepProvider implements CepProvider {
       const response = await firstValueFrom(
         this.httpService.get<T>(url, {
           timeout: timeoutMs,
+          ...(options?.signal ? { signal: options.signal } : {}),
         }),
       );
 
@@ -52,8 +56,8 @@ export abstract class BaseHttpCepProvider implements CepProvider {
       return response.data;
     } catch (error) {
       const durationMs = Math.round(performance.now() - startTime);
-      const statusCode =
-        error instanceof AxiosError ? error.response?.status : undefined;
+      const axiosError = isAxiosError(error) ? error : undefined;
+      const statusCode = axiosError?.response?.status;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
 
@@ -75,11 +79,7 @@ export abstract class BaseHttpCepProvider implements CepProvider {
         });
       }
 
-      if (
-        options?.notFoundOn404 &&
-        error instanceof AxiosError &&
-        error.response?.status === 404
-      ) {
+      if (options?.notFoundOn404 && axiosError?.response?.status === 404) {
         return null;
       }
 
@@ -105,5 +105,5 @@ export abstract class BaseHttpCepProvider implements CepProvider {
     return result.data;
   }
 
-  abstract find(cep: string): Promise<CepResponse | null>;
+  abstract find(cep: string, signal?: AbortSignal): Promise<CepProviderResult>;
 }

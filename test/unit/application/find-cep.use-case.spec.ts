@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PinoLogger } from 'nestjs-pino';
 import { FindCepUseCase } from '../../../src/modules/cep/application/use-cases/find-cep.use-case';
-import { CepProvider } from '../../../src/modules/cep/domain/interfaces/cep-provider.interface';
+import {
+  CepProvider,
+  CepProviderResult,
+} from '../../../src/modules/cep/domain/interfaces/cep-provider.interface';
 import { CepResponse } from '../../../src/modules/cep/presentation/schemas/cep-response.schema';
 import { RoundRobinStrategy } from '../../../src/shared/strategies/round-robin.strategy';
 import { AllProvidersFailedException } from '../../../src/shared/errors/all-providers-failed.exception';
@@ -9,216 +12,149 @@ import { CepNotFoundException } from '../../../src/shared/errors/cep-not-found.e
 import { ProviderContractException } from '../../../src/shared/errors/provider-contract.exception';
 import { TelemetryMetricsService } from '../../../src/shared/observability/telemetry-metrics.service';
 
+const cep: CepResponse = {
+  cep: '01001000',
+  street: 'Praca da Se',
+  complement: '',
+  neighborhood: 'Se',
+  city: 'Sao Paulo',
+  state: 'SP',
+  ibge: '3550308',
+};
+const found: CepProviderResult = { status: 'found', data: cep };
+const notFound: CepProviderResult = { status: 'not_found' };
+
+const createProvider = (name: string): CepProvider => ({
+  name,
+  find: vi.fn(),
+});
+
 describe('FindCepUseCase', () => {
-  let provider1: CepProvider;
-  let provider2: CepProvider;
+  let first: CepProvider;
+  let second: CepProvider;
+  let logger: PinoLogger;
+  let telemetry: TelemetryMetricsService;
   let useCase: FindCepUseCase;
 
-  const sampleCepResponse: CepResponse = {
-    cep: '01001000',
-    street: 'Praça da Sé',
-    complement: 'lado ímpar',
-    neighborhood: 'Sé',
-    city: 'São Paulo',
-    state: 'SP',
-    ibge: '3550308',
-  };
-
-  const sampleCepResponse2: CepResponse = {
-    cep: '01001000',
-    street: 'Praça da Sé Provider 2',
-    complement: '',
-    neighborhood: 'Sé',
-    city: 'São Paulo',
-    state: 'SP',
-    ibge: '3550308',
-  };
-
-  let dummyLogger: PinoLogger;
-  let dummyTelemetry: TelemetryMetricsService;
-
   beforeEach(() => {
-    provider1 = {
-      name: 'Provider1',
-      find: vi.fn(),
-    };
-
-    provider2 = {
-      name: 'Provider2',
-      find: vi.fn(),
-    };
-
-    dummyLogger = {
+    first = createProvider('First');
+    second = createProvider('Second');
+    logger = {
       setContext: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
-      debug: vi.fn(),
     } as unknown as PinoLogger;
-
-    dummyTelemetry = {
+    telemetry = {
       incrementCepRequests: vi.fn(),
-      incrementCacheRequests: vi.fn(),
-      setCircuitBreakerState: vi.fn(),
     } as unknown as TelemetryMetricsService;
-
     useCase = new FindCepUseCase(
-      new RoundRobinStrategy([provider1, provider2]),
-      dummyLogger,
-      dummyTelemetry,
+      new RoundRobinStrategy([first, second]),
+      logger,
+      5000,
+      telemetry,
     );
   });
 
-  describe('Execution', () => {
-    it('should call provider with the given CEP and return result', async () => {
-      vi.mocked(provider1.find).mockResolvedValue(sampleCepResponse);
+  afterEach(() => vi.restoreAllMocks());
 
-      const result = await useCase.execute('01001000');
+  it('returns the first successful result without calling the fallback', async () => {
+    vi.mocked(first.find).mockResolvedValue(found);
 
-      expect(provider1.find).toHaveBeenCalledWith('01001000');
-      expect(result).toEqual(sampleCepResponse);
-    });
+    await expect(useCase.execute('01001000')).resolves.toEqual(cep);
+    expect(second.find).not.toHaveBeenCalled();
   });
 
-  describe('Round-Robin Distribution', () => {
-    it('should alternate between providers on sequential calls', async () => {
-      vi.mocked(provider1.find).mockResolvedValue(sampleCepResponse);
-      vi.mocked(provider2.find).mockResolvedValue(sampleCepResponse2);
+  it('uses the same abort signal when falling back after a technical error', async () => {
+    vi.mocked(first.find).mockRejectedValue(new Error('network error'));
+    vi.mocked(second.find).mockResolvedValue(found);
 
-      const res1 = await useCase.execute('01001000');
-      expect(provider1.find).toHaveBeenCalledTimes(1);
-      expect(provider2.find).toHaveBeenCalledTimes(0);
-      expect(res1).toEqual(sampleCepResponse);
+    await expect(useCase.execute('01001000')).resolves.toEqual(cep);
 
-      const res2 = await useCase.execute('01001000');
-      expect(provider1.find).toHaveBeenCalledTimes(1);
-      expect(provider2.find).toHaveBeenCalledTimes(1);
-      expect(res2).toEqual(sampleCepResponse2);
-
-      const res3 = await useCase.execute('01001000');
-      expect(provider1.find).toHaveBeenCalledTimes(2);
-      expect(provider2.find).toHaveBeenCalledTimes(1);
-      expect(res3).toEqual(sampleCepResponse);
-    });
+    const firstSignal = vi.mocked(first.find).mock.calls[0][1];
+    const secondSignal = vi.mocked(second.find).mock.calls[0][1];
+    expect(firstSignal).toBeInstanceOf(AbortSignal);
+    expect(secondSignal).toBe(firstSignal);
   });
 
-  describe('Fallback behavior', () => {
-    it('should fallback to second provider when first provider throws an error', async () => {
-      vi.mocked(provider1.find).mockRejectedValue(new Error('Network timeout'));
-      vi.mocked(provider2.find).mockResolvedValue(sampleCepResponse2);
+  it('falls back after an explicit not_found result', async () => {
+    vi.mocked(first.find).mockResolvedValue(notFound);
+    vi.mocked(second.find).mockResolvedValue(found);
 
-      const result = await useCase.execute('01001000');
-
-      expect(provider1.find).toHaveBeenCalledWith('01001000');
-      expect(provider2.find).toHaveBeenCalledWith('01001000');
-      expect(result).toEqual(sampleCepResponse2);
-    });
-
-    it('should fallback to second provider when first provider returns null', async () => {
-      vi.mocked(provider1.find).mockResolvedValue(null);
-      vi.mocked(provider2.find).mockResolvedValue(sampleCepResponse2);
-
-      const result = await useCase.execute('01001000');
-
-      expect(provider1.find).toHaveBeenCalledWith('01001000');
-      expect(provider2.find).toHaveBeenCalledWith('01001000');
-      expect(result).toEqual(sampleCepResponse2);
-    });
+    await expect(useCase.execute('01001000')).resolves.toEqual(cep);
   });
 
-  describe('Contract violation handling', () => {
-    it('should log ERROR, increment contract_violation metric, and fallback when provider throws ProviderContractException', async () => {
-      const contractError = new ProviderContractException(
-        'Provider1',
-        [
-          {
-            code: 'invalid_type',
-            expected: 'string',
-            received: 'number',
-            path: ['cep'],
-            message: 'Expected string',
-          },
-        ],
-        { cep: 12345 },
-      );
+  it('records contract violations and continues the fallback', async () => {
+    const contractError = new ProviderContractException(
+      'First',
+      [
+        {
+          code: 'invalid_type',
+          expected: 'string',
+          received: 'number',
+          path: ['cep'],
+          message: 'Expected string',
+        },
+      ],
+      { cep: 123 },
+    );
+    vi.mocked(first.find).mockRejectedValue(contractError);
+    vi.mocked(second.find).mockResolvedValue(found);
 
-      vi.mocked(provider1.find).mockRejectedValue(contractError);
-      vi.mocked(provider2.find).mockResolvedValue(sampleCepResponse2);
+    await expect(useCase.execute('01001000')).resolves.toEqual(cep);
+    expect(telemetry.incrementCepRequests).toHaveBeenCalledWith(
+      'First',
+      'contract_violation',
+    );
+    expect(logger.error).toHaveBeenCalledOnce();
+  });
 
-      const result = await useCase.execute('01001000');
+  it('returns 404 only when every provider confirms not_found', async () => {
+    vi.mocked(first.find).mockResolvedValue(notFound);
+    vi.mocked(second.find).mockResolvedValue(notFound);
 
-      expect(result).toEqual(sampleCepResponse2);
+    await expect(useCase.execute('99999999')).rejects.toBeInstanceOf(
+      CepNotFoundException,
+    );
+  });
 
-      expect(dummyLogger.error).toHaveBeenCalledTimes(1);
-      expect(dummyLogger.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          provider: 'Provider1',
-          code: 'PROVIDER_CONTRACT_VIOLATION',
-          cep: '01001000',
-          issues: contractError.issues,
-          rawData: contractError.rawData,
+  it('returns 502 when every provider fails', async () => {
+    vi.mocked(first.find).mockRejectedValue(new Error('timeout'));
+    vi.mocked(second.find).mockRejectedValue(new Error('network error'));
+
+    await expect(useCase.execute('01001000')).rejects.toBeInstanceOf(
+      AllProvidersFailedException,
+    );
+  });
+
+  it('returns 502 when not_found is mixed with a technical failure', async () => {
+    vi.mocked(first.find).mockResolvedValue(notFound);
+    vi.mocked(second.find).mockRejectedValue(new Error('timeout'));
+
+    await expect(useCase.execute('01001000')).rejects.toBeInstanceOf(
+      AllProvidersFailedException,
+    );
+  });
+
+  it('stops fallback when the global signal aborts', async () => {
+    const controller = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    vi.mocked(first.find).mockImplementation(
+      (_cep, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => reject(new Error('aborted')),
+            { once: true },
+          );
         }),
-        expect.stringContaining(
-          'CRITICAL: Provider Provider1 violated response contract',
-        ),
-      );
+    );
 
-      expect(dummyTelemetry.incrementCepRequests).toHaveBeenCalledWith(
-        'Provider1',
-        'contract_violation',
-      );
-      expect(dummyTelemetry.incrementCepRequests).toHaveBeenCalledWith(
-        'Provider2',
-        'success',
-      );
-    });
-  });
+    const execution = useCase.execute('01001000');
+    controller.abort();
 
-  describe('Failure scenarios', () => {
-    it('should throw CepNotFoundException when all providers return null', async () => {
-      vi.mocked(provider1.find).mockResolvedValue(null);
-      vi.mocked(provider2.find).mockResolvedValue(null);
-
-      await expect(useCase.execute('99999999')).rejects.toThrow(
-        CepNotFoundException,
-      );
-      expect(provider1.find).toHaveBeenCalledWith('99999999');
-      expect(provider2.find).toHaveBeenCalledWith('99999999');
-    });
-
-    it('should throw AllProvidersFailedException when all providers throw errors', async () => {
-      vi.mocked(provider1.find).mockRejectedValue(
-        new Error('Timeout in provider 1'),
-      );
-      vi.mocked(provider2.find).mockRejectedValue(
-        new Error('Connection error in provider 2'),
-      );
-
-      await expect(useCase.execute('01001000')).rejects.toThrow(
-        AllProvidersFailedException,
-      );
-      expect(provider1.find).toHaveBeenCalledWith('01001000');
-      expect(provider2.find).toHaveBeenCalledWith('01001000');
-    });
-
-    it('should throw CepNotFoundException when first provider throws and second returns null', async () => {
-      vi.mocked(provider1.find).mockRejectedValue(new Error('Timeout'));
-      vi.mocked(provider2.find).mockResolvedValue(null);
-
-      await expect(useCase.execute('01001000')).rejects.toThrow(
-        CepNotFoundException,
-      );
-    });
-
-    it('should throw CepNotFoundException when first provider returns null and second throws', async () => {
-      vi.mocked(provider1.find).mockResolvedValue(null);
-      vi.mocked(provider2.find).mockRejectedValue(
-        new Error('500 Internal Server Error'),
-      );
-
-      await expect(useCase.execute('01001000')).rejects.toThrow(
-        CepNotFoundException,
-      );
-    });
+    await expect(execution).rejects.toBeInstanceOf(AllProvidersFailedException);
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(5000);
+    expect(second.find).not.toHaveBeenCalled();
   });
 });
