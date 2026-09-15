@@ -8,7 +8,7 @@ Este documento descreve a implementação do padrão **Circuit Breaker** (utiliz
 
 - **Fail-Fast:** Ao atingir o limiar crítico de falhas, o circuito abre e rejeita requisições subsequentes em menos de **1ms**, sem desperdiçar conexões de rede ou aguardar timeouts.
 - **Isolamento por Provedor:** Cada provedor possui sua própria instância de disjuntor. A instabilidade do ViaCEP não afeta a disponibilidade do BrasilAPI (e vice-versa).
-- **Auto-Recuperação (Self-Healing):** Após o período de resfriamento, o circuito transita para *Half-Open* e envia uma requisição piloto para testar a recuperação do serviço externo.
+- **Auto-Recuperação (Self-Healing):** Após o período de resfriamento, o circuito transita para _Half-Open_ e envia uma requisição piloto para testar a recuperação do serviço externo.
 - **Transparência de Domínio:** O caso de uso (`FindCepUseCase`) interage apenas com a interface `CepProvider`, sem conhecimento da biblioteca de resiliência.
 
 ---
@@ -58,10 +58,13 @@ O `CircuitBreakerCepProvider` empacota qualquer implementação de `CepProvider`
 // src/shared/circuit-breaker/circuit-breaker-cep-provider.ts
 export class CircuitBreakerCepProvider implements CepProvider {
   readonly name: string;
-  private readonly breaker: CircuitBreaker<[string, AbortSignal?], CepProviderResult>;
+  private readonly breaker: CircuitBreaker<
+    [string, AbortSignal?],
+    CepProviderResult
+  >;
 
   constructor(provider: CepProvider, options: CircuitBreakerOptions) {
-    this.name = `CircuitBreaker(${provider.name})`;
+    this.name = provider.name;
     this.breaker = new CircuitBreaker(
       (cep: string, signal?: AbortSignal) => provider.find(cep, signal),
       options,
@@ -75,6 +78,7 @@ export class CircuitBreakerCepProvider implements CepProvider {
 ```
 
 ### Injeção de Dependência no `CepModule`
+
 No arquivo `src/modules/cep/cep.module.ts`, o token `CEP_PROVIDERS` aplica automaticamente o decorator a todos os provedores injetados:
 
 ```typescript
@@ -88,13 +92,14 @@ return providers.map((p) => new CircuitBreakerCepProvider(p, options));
 
 ## 4. Política de Falhas
 
-| Cenário | Comportamento do Provedor | Contabiliza Falha no Circuit Breaker? | Ação no Caso de Uso |
-| :--- | :--- | :---: | :--- |
-| **CEP Inexistente (404)** | Retorna `{ status: 'not_found' }` | ❌ **Não** (Sucesso de negócio) | Registra a confirmação; responde 404 apenas se todos confirmarem. |
-| **Timeout de Rede** | Lança erro de timeout | ✅ **Sim** | Faz fallback imediato para o próximo provedor. |
-| **Erro HTTP 5xx / Rede** | Lança exceção de conexão | ✅ **Sim** | Faz fallback imediato para o próximo provedor. |
-| **Violação de Contrato** | Lança `ProviderContractException` | ✅ **Sim** | Loga erro, registra métrica e faz fallback. |
-| **Circuito ABERTO** | Rejeição imediata (`<1ms`) | N/A *(Fail-Fast)* | Tenta próximo provedor sem gerar I/O de rede. |
+| Cenário                   | Comportamento do Provedor                      |         Contabiliza Falha no Circuit Breaker?          | Ação no Caso de Uso                                               |
+| :------------------------ | :--------------------------------------------- | :----------------------------------------------------: | :---------------------------------------------------------------- |
+| **CEP Inexistente (404)** | Retorna `{ status: 'not_found' }`              |            ❌ **Não** (Sucesso de negócio)             | Registra a confirmação; responde 404 apenas se todos confirmarem. |
+| **Timeout de Rede**       | Lança erro de timeout                          |                       ✅ **Sim**                       | Faz fallback imediato para o próximo provedor.                    |
+| **Deadline Global**       | O `AbortSignal` cancela a chamada em andamento | ❌ **Não** (limite da operação, não falha do provedor) | Encerra o fallback e retorna 502.                                 |
+| **Erro HTTP 5xx / Rede**  | Lança exceção de conexão                       |                       ✅ **Sim**                       | Faz fallback imediato para o próximo provedor.                    |
+| **Violação de Contrato**  | Lança `ProviderContractException`              |                       ✅ **Sim**                       | Loga erro, registra métrica e faz fallback.                       |
+| **Circuito ABERTO**       | Rejeição imediata (`<1ms`)                     |                   N/A _(Fail-Fast)_                    | Tenta próximo provedor sem gerar I/O de rede.                     |
 
 ---
 
@@ -102,17 +107,17 @@ return providers.map((p) => new CircuitBreakerCepProvider(p, options));
 
 Valores validados no bootstrap via Zod (`src/shared/config/env.validation.ts`):
 
-| Variável | Tipo | Padrão | Descrição |
-| :--- | :---: | :---: | :--- |
-| `CB_ERROR_THRESHOLD_PERCENTAGE` | Number (1-100) | `50` | % de falhas na janela para abrir o circuito. |
-| `CB_RESET_TIMEOUT_MS` | Number | `30000` | Tempo (ms) em estado aberto antes de testar em *Half-Open*. |
-| `CB_VOLUME_THRESHOLD` | Number | `5` | Volume mínimo de requisições na janela para calcular erros. |
-| `CEP_GLOBAL_TIMEOUT_MS` | Number | `5000` | Deadline total (ms) da consulta, incluindo todos os fallbacks. Ao expirar, o sinal compartilhado cancela a operação em andamento. |
-| `CEP_PROVIDER_TIMEOUT_MS` | Number | `2000` | Timeout máximo (ms) de cada requisição individual. O limite efetivo sempre será o menor entre este valor e o tempo restante do deadline global. |
+| Variável                        |      Tipo      | Padrão  | Descrição                                                                                                                                       |
+| :------------------------------ | :------------: | :-----: | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CB_ERROR_THRESHOLD_PERCENTAGE` | Number (1-100) |  `50`   | % de falhas na janela para abrir o circuito.                                                                                                    |
+| `CB_RESET_TIMEOUT_MS`           |     Number     | `30000` | Tempo (ms) em estado aberto antes de testar em _Half-Open_.                                                                                     |
+| `CB_VOLUME_THRESHOLD`           |     Number     |   `5`   | Volume mínimo de requisições na janela para calcular erros.                                                                                     |
+| `CEP_GLOBAL_TIMEOUT_MS`         |     Number     | `5000`  | Deadline total (ms) da consulta, incluindo todos os fallbacks. Ao expirar, o sinal compartilhado cancela a operação em andamento.               |
+| `CEP_PROVIDER_TIMEOUT_MS`       |     Number     | `2000`  | Timeout máximo (ms) de cada requisição individual. O limite efetivo sempre será o menor entre este valor e o tempo restante do deadline global. |
 
 ---
 
 ## 6. Testes Automatizados
 
-- **Unitários (`test/unit/shared/circuit-breaker-cep-provider.spec.ts`):** Valida execução em modo fechado, abertura por threshold, retorno `null` sem penalidade, transição para *Half-Open* e encerramento limpo de timers com `shutdown()`.
+- **Unitários (`test/unit/shared/circuit-breaker-cep-provider.spec.ts`):** Valida execução em modo fechado, abertura por threshold, `not_found` e cancelamento pelo deadline global sem penalidade, transição para _Half-Open_ e encerramento limpo de timers com `shutdown()`.
 - **Integração (`test/integration/cep.module.spec.ts`):** Valida injeção no container NestJS e comportamento de fail-fast/fallback em cenário de indisponibilidade simulada.
