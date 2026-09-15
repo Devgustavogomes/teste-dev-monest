@@ -18,7 +18,7 @@ O sistema separa estritamente os erros em duas categorias:
 | Exceção | Tipo | HTTP Status | Causa | Ação do Sistema |
 | :--- | :--- | :---: | :--- | :--- |
 | `InvalidCepException` | `AppError` | `400 Bad Request` | Formato não possui 8 dígitos numéricos. | Rejeição imediata no pipe de validação. |
-| `CepNotFoundException` | `AppError` | `404 Not Found` | CEP consultado não existe nos provedores. | Salva em cache negativo (10m) e retorna 404. |
+| `CepNotFoundException` | `AppError` | `404 Not Found` | Todos os provedores confirmaram que o CEP não existe. | Salva em cache negativo (10m) e retorna 404. |
 | `AllProvidersFailedException` | `AppError` | `502 Bad Gateway` | Todos os provedores falharam (timeout, circuit breaker aberto ou erro 5xx). | Retorna 502 indicando falha nos upstreams. |
 | `ProviderContractException` | `Error` (Interno) | N/A *(Fallback)* | Provedor externo alterou schema ou quebrou contrato Zod. | Loga `ERROR`, incrementa métrica `contract_violation` e tenta próximo provedor. |
 
@@ -92,9 +92,10 @@ O `GlobalExceptionFilter` intercepta todas as exceções não capturadas:
 
 Quando um provedor externo falha no `FindCepUseCase`:
 
-1. **Timeout (`CEP_PROVIDER_TIMEOUT_MS`):** Requisição abortada; fallback automático para o próximo provedor.
-2. **Circuit Breaker Aberto (`Open`):** Requisição é rejeitada em fail-fast sem fazer chamada de rede; fallback automático.
-3. **Violação de Contrato (`ProviderContractException`):**
+1. **Timeout do Provider (`CEP_PROVIDER_TIMEOUT_MS`):** A tentativa individual é encerrada; se ainda houver orçamento global, ocorre fallback automático para o próximo provedor.
+2. **Deadline Global (`CEP_GLOBAL_TIMEOUT_MS`):** Um `AbortSignal` compartilhado cancela a chamada em andamento e impede o início de novos fallbacks. Se nenhum provedor confirmou que o CEP não existe, a resposta é `502 Bad Gateway`.
+3. **Circuit Breaker Aberto (`Open`):** Requisição é rejeitada em fail-fast sem fazer chamada de rede; fallback automático.
+4. **Violação de Contrato (`ProviderContractException`):**
    - Disparada quando o Zod detecta campos obrigatórios faltantes ou tipos incorretos no payload externo.
    - O use case captura a exceção, registra log com detalhes das issues Zod, incrementa `cep_requests_total{status="contract_violation"}` e executa o fallback.
-4. **Exaustão:** Se todos os provedores falharem na mesma requisição, o use case dispara `AllProvidersFailedException` (502).
+5. **Exaustão:** Se todos os provedores falharem, ou se houver uma combinação de `not_found` com qualquer falha técnica, o use case dispara `AllProvidersFailedException` (502). `CepNotFoundException` (404) exige confirmação de todos os provedores.
