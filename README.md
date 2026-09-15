@@ -1,5 +1,20 @@
 # Teste Técnico - Desenvolvedor
 
+## 📚 Documentação Técnica
+
+Para detalhes completos de arquitetura, execução e resiliência da solução implementada, consulte os guias em [`docs/`](./docs/):
+
+- **[Guia Rápido (Getting Started)](./docs/getting-started.md)**: Como rodar a aplicação localmente e via Docker, endpoints e comandos de teste.
+- **[Arquitetura e Design System](./docs/architecture.md)**: Decisões arquiteturais (Clean Architecture, Provider Pattern, Fallback Strategy).
+- **[Resiliência e Circuit Breaker](./docs/circuit-breaker.md)**: Mecanismos de failover, timeouts e proteção contra cascata de falhas.
+- **[Estratégia de Cache](./docs/cache.md)**: Cache em memória com TTL, eviction policy e headers (`X-Cache`).
+- **[Observabilidade e Logs](./docs/observability.md)**: Estrutura de logs com Pino, tracing de requisições e métricas.
+- **[Tratamento de Erros](./docs/errors.md)**: Mapeamento de erros, contratos RFC 7807 / uniformes e fallbacks.
+- **[Containerização e Docker](./docs/docker.md)**: Multi-stage build, segurança e execução em containers.
+- **[Integração Contínua (CI)](./docs/ci.md)**: Pipelines de validação automática com GitHub Actions.
+
+---
+
 ## O problema
 
 Você precisa criar uma API que consulta CEP. Simples, certo?
