@@ -45,6 +45,7 @@ describe('CircuitBreakerCepProvider', () => {
   afterEach(() => provider.circuit.shutdown());
 
   it('delegates the result and abort signal', async () => {
+    expect(provider.name).toBe('MockProvider');
     const controller = new AbortController();
     vi.mocked(inner.find).mockResolvedValue(found);
 
@@ -73,6 +74,37 @@ describe('CircuitBreakerCepProvider', () => {
     await expect(provider.find('01001000')).rejects.toThrow();
 
     expect(inner.find).toHaveBeenCalledOnce();
+  });
+
+  it('does not count a global deadline cancellation as a provider failure', async () => {
+    const controller = new AbortController();
+    const cancellation = Object.assign(
+      new Error('aborted by global deadline'),
+      {
+        name: 'CanceledError',
+        code: 'ERR_CANCELED',
+      },
+    );
+
+    vi.mocked(inner.find).mockImplementation(
+      (_cep, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(cancellation), {
+            once: true,
+          });
+        }),
+    );
+
+    const request = provider.find('01001000', controller.signal);
+    controller.abort();
+
+    await expect(request).rejects.toThrow('aborted by global deadline');
+    expect(provider.circuit.stats.failures).toBe(0);
+
+    vi.mocked(inner.find).mockResolvedValue(found);
+
+    await expect(provider.find('01001000')).resolves.toEqual(found);
+    expect(inner.find).toHaveBeenCalledTimes(2);
   });
 
   it('allows a probe after entering half-open state', async () => {
