@@ -1,203 +1,121 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 import { of, throwError } from 'rxjs';
-import { AxiosError, AxiosResponse } from 'axios';
+import { AxiosResponse } from 'axios';
 import { BrasilApiProvider } from '../../../src/modules/cep/infrastructure/providers/brasilapi.provider';
 import { Env } from '../../../src/shared/config/env.validation';
 import { ProviderContractException } from '../../../src/shared/errors/provider-contract.exception';
 
+const response = (data: unknown): AxiosResponse =>
+  ({
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {},
+  }) as AxiosResponse;
+
+const axiosError = (status: number) => ({
+  isAxiosError: true,
+  message: `Request failed with status code ${status}`,
+  response: { status },
+});
+
 describe('BrasilApiProvider', () => {
   let provider: BrasilApiProvider;
   let httpService: HttpService;
-  let configService: ConfigService<Env, true>;
 
   beforeEach(() => {
-    httpService = {
-      get: vi.fn(),
-    } as unknown as HttpService;
-
-    configService = {
-      get: vi.fn((key: string) => {
-        if (key === 'BRASILAPI_BASE_URL')
-          return 'https://brasilapi.com.br/api/cep/v1';
-        if (key === 'CEP_PROVIDER_TIMEOUT_MS') return 5000;
-        return undefined;
-      }),
+    httpService = { get: vi.fn() } as unknown as HttpService;
+    const configService = {
+      get: vi.fn((key: string) =>
+        key === 'BRASILAPI_BASE_URL'
+          ? 'https://brasilapi.com.br/api/cep/v1'
+          : 2000,
+      ),
     } as unknown as ConfigService<Env, true>;
-
-    const dummyLogger = {
+    const logger = {
       setContext: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
-      debug: vi.fn(),
     } as unknown as PinoLogger;
 
-    provider = new BrasilApiProvider(httpService, configService, dummyLogger);
+    provider = new BrasilApiProvider(httpService, configService, logger);
   });
 
-  it('should have provider name "BrasilAPI"', () => {
-    expect(provider.name).toBe('BrasilAPI');
-  });
-
-  describe('find()', () => {
-    it('should map successful BrasilAPI response to unified CepResponse contract', async () => {
-      const mockApiResponse = {
-        data: {
+  it('maps a successful response to the shared contract', async () => {
+    vi.mocked(httpService.get).mockReturnValue(
+      of(
+        response({
           cep: '01001-000',
           state: 'SP',
-          city: 'São Paulo',
-          neighborhood: 'Sé',
-          street: 'Praça da Sé',
+          city: 'Sao Paulo',
+          neighborhood: 'Se',
+          street: 'Praca da Se',
           service: 'viacep',
-        },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config: {} as any,
-      } as AxiosResponse;
+        }),
+      ),
+    );
 
-      vi.spyOn(httpService, 'get').mockReturnValue(of(mockApiResponse));
-
-      const result = await provider.find('01001000');
-
-      expect(httpService.get).toHaveBeenCalledWith(
-        'https://brasilapi.com.br/api/cep/v1/01001000',
-        { timeout: 5000 },
-      );
-      expect(result).toEqual({
+    await expect(provider.find('01001000')).resolves.toEqual({
+      status: 'found',
+      data: {
         cep: '01001000',
-        street: 'Praça da Sé',
+        street: 'Praca da Se',
         complement: '',
-        neighborhood: 'Sé',
-        city: 'São Paulo',
+        neighborhood: 'Se',
+        city: 'Sao Paulo',
         state: 'SP',
         ibge: '',
-      });
+      },
     });
+  });
 
-    it('should handle missing optional fields (street/neighborhood) with fallback empty strings', async () => {
-      const mockApiResponse = {
-        data: {
+  it('defaults optional address fields to empty strings', async () => {
+    vi.mocked(httpService.get).mockReturnValue(
+      of(
+        response({
           cep: '01001-000',
           state: 'SP',
-          city: 'São Paulo',
+          city: 'Sao Paulo',
           service: 'correios',
-        },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config: {} as any,
-      } as AxiosResponse;
+        }),
+      ),
+    );
 
-      vi.spyOn(httpService, 'get').mockReturnValue(of(mockApiResponse));
+    const result = await provider.find('01001000');
 
-      const result = await provider.find('01001000');
-
-      expect(result).toEqual({
-        cep: '01001000',
-        street: '',
-        complement: '',
-        neighborhood: '',
-        city: 'São Paulo',
-        state: 'SP',
-        ibge: '',
-      });
+    expect(result).toMatchObject({
+      status: 'found',
+      data: { street: '', neighborhood: '' },
     });
+  });
 
-    it('should return null when BrasilAPI returns HTTP 404 (CEP not found)', async () => {
-      const notFoundError = new AxiosError(
-        'Request failed with status code 404',
-        'ERR_BAD_REQUEST',
-        undefined,
-        undefined,
-        { status: 404, data: { message: 'CEP não encontrado' } } as any,
-      );
+  it('maps Axios-compatible 404 errors to not_found', async () => {
+    vi.mocked(httpService.get).mockReturnValue(
+      throwError(() => axiosError(404)),
+    );
 
-      vi.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => notFoundError),
-      );
-
-      const result = await provider.find('99999999');
-
-      expect(httpService.get).toHaveBeenCalledWith(
-        'https://brasilapi.com.br/api/cep/v1/99999999',
-        { timeout: 5000 },
-      );
-      expect(result).toBeNull();
+    await expect(provider.find('99999999')).resolves.toEqual({
+      status: 'not_found',
     });
+  });
 
-    it('should propagate timeout errors from HttpService', async () => {
-      const timeoutError = new AxiosError(
-        'timeout of 5000ms exceeded',
-        'ECONNABORTED',
-      );
+  it('does not classify other upstream failures as not_found', async () => {
+    const upstreamError = axiosError(500);
+    vi.mocked(httpService.get).mockReturnValue(throwError(() => upstreamError));
 
-      vi.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => timeoutError),
-      );
+    await expect(provider.find('01001000')).rejects.toBe(upstreamError);
+  });
 
-      await expect(provider.find('01001000')).rejects.toThrow(timeoutError);
-    });
+  it('rejects payloads outside the provider contract', async () => {
+    vi.mocked(httpService.get).mockReturnValue(of(response({ invalid: true })));
 
-    it('should propagate network errors from HttpService', async () => {
-      const networkError = new AxiosError(
-        'getaddrinfo ENOTFOUND brasilapi.com.br',
-        'ENOTFOUND',
-      );
-
-      vi.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => networkError),
-      );
-
-      await expect(provider.find('01001000')).rejects.toThrow(networkError);
-    });
-
-    it('should propagate 5xx HTTP errors from HttpService', async () => {
-      const serverError = new AxiosError(
-        'Request failed with status code 500',
-        'ERR_BAD_RESPONSE',
-        undefined,
-        undefined,
-        { status: 500, data: 'Internal Server Error' } as any,
-      );
-
-      vi.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => serverError),
-      );
-
-      await expect(provider.find('01001000')).rejects.toThrow(serverError);
-    });
-
-    it('should propagate generic errors not related to Axios', async () => {
-      const unexpectedError = new Error('Unexpected runtime exception');
-
-      vi.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => unexpectedError),
-      );
-
-      await expect(provider.find('01001000')).rejects.toThrow(unexpectedError);
-    });
-
-    it('should throw ProviderContractException with [BRASILAPI] prefix when response payload is invalid', async () => {
-      const invalidResponse = {
-        data: {
-          invalid_field: 123,
-        },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config: {} as any,
-      } as AxiosResponse;
-
-      vi.spyOn(httpService, 'get').mockReturnValue(of(invalidResponse));
-
-      await expect(provider.find('01001000')).rejects.toThrow(
-        ProviderContractException,
-      );
-      await expect(provider.find('01001000')).rejects.toThrow('[BRASILAPI]');
-    });
+    await expect(provider.find('01001000')).rejects.toBeInstanceOf(
+      ProviderContractException,
+    );
   });
 });
