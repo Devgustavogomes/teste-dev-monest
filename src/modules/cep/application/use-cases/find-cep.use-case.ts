@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { CepProvider } from '../../domain/interfaces/cep-provider.interface';
 import { CepResponse } from '../../presentation/schemas/cep-response.schema';
@@ -7,39 +7,50 @@ import { CepNotFoundException } from '../../../../shared/errors/cep-not-found.ex
 import { AllProvidersFailedException } from '../../../../shared/errors/all-providers-failed.exception';
 import { ProviderContractException } from '../../../../shared/errors/provider-contract.exception';
 import { TelemetryMetricsService } from '../../../../shared/observability/telemetry-metrics.service';
+import { CEP_GLOBAL_TIMEOUT } from '../../cep.constants';
 
 @Injectable()
 export class FindCepUseCase {
   constructor(
     private readonly roundRobin: RoundRobinStrategy<CepProvider>,
     private readonly logger: PinoLogger,
+    @Inject(CEP_GLOBAL_TIMEOUT) private readonly globalTimeoutMs: number,
     private readonly telemetryMetrics?: TelemetryMetricsService,
   ) {
     this.logger.setContext(FindCepUseCase.name);
   }
 
   async execute(cep: string): Promise<CepResponse> {
+    const signal = AbortSignal.timeout(this.globalTimeoutMs);
     const providers = this.roundRobin.nextSequence();
-    let notFound = false;
+    let notFoundCount = 0;
 
     for (const provider of providers) {
+      if (signal.aborted) {
+        break;
+      }
+
       const startTime = performance.now();
       try {
-        const result = await provider.find(cep);
+        const result = await provider.find(cep, signal);
 
-        if (result !== null) {
+        if (result.status === 'found') {
           this.recordSuccess(provider.name, cep, startTime);
-          return result;
+          return result.data;
         }
 
         this.recordNotFound(provider.name);
-        notFound = true;
+        notFoundCount++;
       } catch (error) {
         this.recordFailure(provider.name, cep, error, startTime);
+
+        if (signal.aborted) {
+          break;
+        }
       }
     }
 
-    if (notFound) {
+    if (providers.length > 0 && notFoundCount === providers.length) {
       throw new CepNotFoundException(cep);
     }
 

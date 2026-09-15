@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
-import { CepResponse } from '../../presentation/schemas/cep-response.schema';
 import { Env } from '../../../../shared/config/env.validation';
+import { CepProviderResult } from '../../domain/interfaces/cep-provider.interface';
 import { BaseHttpCepProvider } from './base-http-cep.provider';
 import {
   viaCepApiResponseSchema,
@@ -24,30 +24,33 @@ export class ViaCepProvider extends BaseHttpCepProvider {
     super(httpService, configService, logger, ViaCepProvider.name);
   }
 
-  async find(cep: string): Promise<CepResponse | null> {
+  async find(cep: string, signal?: AbortSignal): Promise<CepProviderResult> {
     const baseUrl = this.configService.get('VIACEP_BASE_URL', { infer: true });
     const url = `${baseUrl}/${cep}/json/`;
 
-    const rawData = await this.fetchWithTelemetry<unknown>(url);
+    const rawData = await this.fetchWithTelemetry<unknown>(url, { signal });
 
     if (rawData === null) {
-      return null;
+      return { status: 'not_found' };
     }
 
     const data = this.validateResponse(viaCepApiResponseSchema, rawData);
 
     if (!('cep' in data)) {
-      return null;
+      return { status: 'not_found' };
     }
 
     return {
-      cep: data.cep.replace('-', ''),
-      street: data.logradouro,
-      complement: data.complemento,
-      neighborhood: data.bairro,
-      city: data.localidade,
-      state: data.uf,
-      ibge: data.ibge,
+      status: 'found',
+      data: {
+        cep: data.cep.replace('-', ''),
+        street: data.logradouro,
+        complement: data.complemento,
+        neighborhood: data.bairro,
+        city: data.localidade,
+        state: data.uf,
+        ibge: data.ibge,
+      },
     };
   }
 }

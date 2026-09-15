@@ -1,8 +1,10 @@
 import CircuitBreaker from 'opossum';
 import { PinoLogger } from 'nestjs-pino';
 
-import { CepProvider } from '../../modules/cep/domain/interfaces/cep-provider.interface';
-import { CepResponse } from '../../modules/cep/presentation/schemas/cep-response.schema';
+import {
+  CepProvider,
+  CepProviderResult,
+} from '../../modules/cep/domain/interfaces/cep-provider.interface';
 import { TelemetryMetricsService } from '../observability/telemetry-metrics.service';
 
 export interface CircuitBreakerOptions {
@@ -15,7 +17,10 @@ export interface CircuitBreakerOptions {
 export class CircuitBreakerCepProvider implements CepProvider {
   readonly name: string;
 
-  private readonly breaker: CircuitBreaker<[string], CepResponse | null>;
+  private readonly breaker: CircuitBreaker<
+    [string, AbortSignal?],
+    CepProviderResult
+  >;
 
   constructor(
     provider: CepProvider,
@@ -28,12 +33,15 @@ export class CircuitBreakerCepProvider implements CepProvider {
     const { timeout, errorThresholdPercentage, resetTimeout, volumeThreshold } =
       options;
 
-    this.breaker = new CircuitBreaker((cep: string) => provider.find(cep), {
-      timeout,
-      errorThresholdPercentage,
-      resetTimeout,
-      volumeThreshold,
-    });
+    this.breaker = new CircuitBreaker(
+      (cep: string, signal?: AbortSignal) => provider.find(cep, signal),
+      {
+        timeout,
+        errorThresholdPercentage,
+        resetTimeout,
+        volumeThreshold,
+      },
+    );
 
     this.breaker.on('open', () => {
       this.telemetryMetrics?.setCircuitBreakerState(provider.name, 1);
@@ -58,11 +66,11 @@ export class CircuitBreakerCepProvider implements CepProvider {
     });
   }
 
-  find(cep: string): Promise<CepResponse | null> {
-    return this.breaker.fire(cep);
+  find(cep: string, signal?: AbortSignal): Promise<CepProviderResult> {
+    return this.breaker.fire(cep, signal);
   }
 
-  get circuit(): CircuitBreaker<[string], CepResponse | null> {
+  get circuit(): CircuitBreaker<[string, AbortSignal?], CepProviderResult> {
     return this.breaker;
   }
 }

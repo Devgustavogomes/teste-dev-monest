@@ -13,6 +13,12 @@ export const envSchema = z.object({
 
   CEP_PROVIDER_TIMEOUT_MS: z
     .string()
+    .default('2000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
+
+  CEP_GLOBAL_TIMEOUT_MS: z
+    .string()
     .default('5000')
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
